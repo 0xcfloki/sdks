@@ -2,7 +2,7 @@
 
 A command-line interface (CLI) for interacting with the Rysk v12 protocol via WebSockets.
 
-This CLI allows you to connect to a WebSocket server, send signed messages for actions like approving token spending, initiating transfers, and sending quotes. It utilizes Unix sockets for inter-process communication, enabling you to send commands to a running WebSocket connection from other processes.
+This CLI allows you to connect to a WebSocket server, send signed messages for actions like approving token spending, initiating transfers, and sending quotes. A running `connect` takes its commands on stdin and signs and sends them itself, so nothing is spawned per message.
 
 ## Prerequisites
 
@@ -73,29 +73,44 @@ Flags
 
 Retrieves USDC balances for the specified account.
 
-```bash
-./ryskV12 balances --channel_id <channel_id> --account <0xabc>
+```json
+["balances", "--account", "<0xabc>"]
 ```
 
 Flags
 
 - `--account` (**required**): The address to query data for.
-- `--channel_id` (**required**): Unique ID for the connection and named pipe (/tmp/<channel_id>).
 
 ---
 
 ### `connect`
 
-Establishes a WebSocket connection and runs in daemon mode with a named pipe.
+Establishes a WebSocket connection. Every message from the server is printed to stdout, one per line.
 
 ```bash
-./ryskV12 connect --channel_id <channel_id> --url <websocket_url>
+./ryskV12 connect --url <websocket_url>
 ```
 
 Flags
 
-- `--channel_id` (**required**): Unique ID for the connection and named pipe (/tmp/<channel_id>).
 - `--url` (**required**): WebSocket URL to connect to.
+
+Commands for the connection - `balances`, `positions`, `quote` and `transfer` - are written to its
+stdin, one json array of args per line, exactly as they would follow `./ryskV12` on the command line.
+They run in order inside the connect process, so nothing is spawned per message:
+
+```bash
+echo '["balances", "--account", "0xabc"]' | ./ryskV12 connect --url wss://<base_url>/maker
+```
+
+A command that fails is reported on stdout as a json-rpc error, under the id the server would have
+answered with (the `--rfq_id` for a quote, the command name otherwise), and the connection carries on.
+Every message, the server's or the CLI's, is exactly one line. Closing stdin stops commands
+but not the connection, so a listen-only `connect` can run with stdin at `/dev/null`. Kill the process
+(`SIGTERM`) to disconnect. Run in a background job of an interactive shell, redirect stdin
+(`< /dev/null` or a fifo), or reading the terminal stops the process.
+
+Run on its own, a connection command prints its signed json-rpc message instead of sending it.
 
 Endpoints:
 
@@ -107,14 +122,13 @@ Endpoints:
 ### `positions`
 
 Retrieves positions (oToken details) for the specified account
-```bash
-./ryskV12 positions --channel_id <channel_id> --account <0xabc>
+```json
+["positions", "--account", "<0xabc>"]
 ```
 
 Flags
 
 - `--account` (**required**): The address to query data for.
-- `--channel_id` (**required**): Unique ID for the connection and named pipe (/tmp/<channel_id>).
 
 Endpoints:
 
@@ -125,15 +139,14 @@ Endpoints:
 
 ### `quote`
 
-Sends a signed quote for options trading through the WebSocket.
+Sends a signed quote for options trading through the WebSocket. Written to a `connect`'s stdin as a json array, shown here as command line args.
 
 ```bash
-./ryskV12 quote --channel_id <channel_id> --rfq_id <rfq_id> --chain_id <chain_id> --expiry <expiry_timestamp>  --maker <maker_address> --nonce <nonce> --price <price> --quantity <quantity> --strike <strike> --valid_until <valid_until_timestamp> --collateral <collateral> --private_key <private_key> --is_put --is_taker_buy
+quote --rfq_id <rfq_id> --chain_id <chain_id> --expiry <expiry_timestamp>  --maker <maker_address> --nonce <nonce> --price <price> --quantity <quantity> --strike <strike> --valid_until <valid_until_timestamp> --collateral <collateral> --private_key <private_key> --is_put --is_taker_buy
 ```
 
 Flags
 
-- `--channel_id` (**required**): The unique ID of the WebSocket connection.
 - `--rfq_id` (**required**): The unique ID of the rfq you are quoting for.
 - `--chain_id` (**required**): The ID of the blockchain.
 - `--expiry` (**required**): Option expiry timestamp.
@@ -160,7 +173,7 @@ follows `--chain_id`.
 - `--domain_verifying_contract`: EIP712 domain verifying contract.
 
 ```bash
-./ryskV12 quote ... \
+quote ... \
   --domain_name rysk \
   --domain_version 0.0.0 \
   --domain_verifying_contract 0x0ff34dd648b68f09b199b60b91442e750fd13fdc
@@ -171,7 +184,7 @@ follows `--chain_id`.
 ### `premium`
 
 Maker actions against the premium RFQ api (`https://premium.rysk.finance`, override with `--url`).
-These are plain HTTP calls, so they need no `connect` and no channel: each subcommand does one
+These are plain HTTP calls, so they need no `connect`: each subcommand does one
 request and prints the api's response on stdout as it came. Set `RYSK_PREMIUM_URL` instead of passing
 `--url` every time; a host that answers but has no RFQ routes is reported as such rather than as a
 missing id.
@@ -251,15 +264,14 @@ signing key — the CLI holds no state between invocations.
 
 ### `transfer`
 
-Requests a transfer (deposit or withdrawal) through the WebSocket.
+Requests a transfer (deposit or withdrawal) through the WebSocket. Written to a `connect`'s stdin as a json array, shown here as command line args.
 
 ```bash
-./ryskV12 transfer --channel_id <channel_id> --chain_id <chain_id> --user <user_address> --asset <asset_address> --amount <amount> --nonce <nonce> --private_key <private_key> --is_deposit
+transfer --chain_id <chain_id> --user <user_address> --asset <asset_address> --amount <amount> --nonce <nonce> --private_key <private_key> --is_deposit
 ```
 
 Flags
 
-- `--channel_id` (**required**): The unique ID of the WebSocket connection (matches connect --channel_id).
 - `--chain_id` (**required**): The ID of the blockchain for the transfer.
 - `--user` (**required**): THe address of the account executing the deposit.
 - `--asset` (**required**): The address of the asset being transferred.

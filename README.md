@@ -11,7 +11,10 @@ Monorepo for the Rysk client stack: the Go CLI and the SDKs that wrap it.
 | C++ SDK | [`packages/cpp`](packages/cpp) | source, via CMake | `cpp-vX.Y.Z` |
 
 The SDKs do not reimplement the protocol — they spawn the CLI binary and talk
-to it over JSON-RPC on stdio. Published SDK packages download the CLI from this
+to it over stdio. A websocket connection is one long-lived `connect` process:
+server messages come out on its stdout, and the SDK writes commands (quotes,
+transfers, account reads) to its stdin, where they are signed and sent in that
+same process. Published SDK packages download the CLI from this
 repo's releases (`scripts/fetch_latest_release.sh`, picking the newest `cli-v*`
 release). Point them elsewhere with `RYSK_CLI_REPO` / `RYSK_CLI_TAG_PREFIX`.
 

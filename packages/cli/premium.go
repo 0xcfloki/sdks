@@ -17,7 +17,6 @@ import (
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 	"github.com/goccy/go-json"
-	"github.com/urfave/cli/v2"
 )
 
 const (
@@ -37,10 +36,10 @@ const (
 	PREMIUM_MILLISECONDS_THRESHOLD = int64(1e12)
 )
 
-var premiumAction = &cli.Command{
+var premiumAction = &Command{
 	Name:  "premium",
 	Usage: "maker actions against the premium rfq api",
-	Subcommands: []*cli.Command{
+	Subcommands: []*Command{
 		premiumRequestsAction,
 		premiumQuoteAction,
 		premiumQuotesAction,
@@ -49,8 +48,8 @@ var premiumAction = &cli.Command{
 	},
 }
 
-func premiumURLFlag() cli.Flag {
-	return &cli.StringFlag{
+func premiumURLFlag() Flag {
+	return &StringFlag{
 		Name:    "url",
 		Value:   PREMIUM_URL,
 		EnvVars: []string{"RYSK_PREMIUM_URL"},
@@ -58,174 +57,174 @@ func premiumURLFlag() cli.Flag {
 	}
 }
 
-var premiumRequestsAction = &cli.Command{
+var premiumRequestsAction = &Command{
 	Name:  "requests",
 	Usage: "list the live requests this maker may quote",
-	Flags: []cli.Flag{
+	Flags: []Flag{
 		premiumURLFlag(),
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "maker",
 			Required: true,
 			Usage:    "maker address to list requests for",
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		query := url.Values{"address": {strings.ToLower(c.String("maker"))}}
 		return premiumProxy(c, http.MethodGet, "/api/requests/maker", query)
 	},
 }
 
-var premiumQuotesAction = &cli.Command{
+var premiumQuotesAction = &Command{
 	Name:  "quotes",
 	Usage: "list this maker's live quotes",
-	Flags: []cli.Flag{
+	Flags: []Flag{
 		premiumURLFlag(),
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "maker",
 			Required: true,
 			Usage:    "maker address to list quotes for",
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		query := url.Values{"address": {strings.ToLower(c.String("maker"))}}
 		return premiumProxy(c, http.MethodGet, "/api/quotes", query)
 	},
 }
 
-var premiumQuoteStatusAction = &cli.Command{
+var premiumQuoteStatusAction = &Command{
 	Name:  "quote-status",
 	Usage: "fetch one quote by id, whatever its status",
-	Flags: []cli.Flag{
+	Flags: []Flag{
 		premiumURLFlag(),
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "id",
 			Required: true,
 			Usage:    "quote id",
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		return premiumProxy(c, http.MethodGet, "/api/quotes/"+url.PathEscape(c.String("id")), nil)
 	},
 }
 
-var premiumCancelAction = &cli.Command{
+var premiumCancelAction = &Command{
 	Name:  "cancel",
 	Usage: "pull one of this maker's quotes",
-	Flags: []cli.Flag{
+	Flags: []Flag{
 		premiumURLFlag(),
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "id",
 			Required: true,
 			Usage:    "quote id to cancel",
 		},
-		&cli.Int64Flag{
+		&Int64Flag{
 			Name:     "chain_id",
 			Required: true,
 			Usage:    "chain id to authenticate against",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "nonce",
 			Required: true,
 			Usage:    "unused nonce for this maker (decimal uint64), drawn from the same counter as your quote nonces",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "private_key",
 			Required: true,
 			Usage:    "private key of the quote's maker",
 			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		return premiumCancel(c)
 	},
 }
 
-var premiumQuoteAction = &cli.Command{
+var premiumQuoteAction = &Command{
 	Name:  "quote",
 	Usage: "sign and post quotes",
-	Flags: []cli.Flag{
+	Flags: []Flag{
 		premiumURLFlag(),
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "batch",
 			Usage: `path to a json array of quotes to sign and post in one call, or "-" for stdin. Cannot be combined with the per quote flags`,
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "request_id",
 			Usage: "id of the request being quoted",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "asset",
 			Usage: "asset address, as it came on the request",
 		},
-		&cli.IntFlag{
+		&IntFlag{
 			Name:  "chain_id",
 			Usage: "chain id, as it came on the request",
 		},
-		&cli.Int64Flag{
+		&Int64Flag{
 			Name:  "expiry",
 			Usage: "option expiry in unix seconds, as it came on the request",
 		},
-		&cli.BoolFlag{
+		&BoolFlag{
 			Name:  "is_put",
 			Usage: "present for a put, as it came on the request",
 		},
-		&cli.BoolFlag{
+		&BoolFlag{
 			Name:  "is_taker_buy",
 			Usage: "present if the taker buys, as it came on the request",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "strike",
 			Usage: "option strike (1e8), as it came on the request",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "quantity",
 			Usage: "option quantity (1e18), as it came on the request",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "usd",
 			Usage: "usd asset address, as it came on the request",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "collateral",
 			Usage: "collateral asset address, as it came on the request",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "maker",
 			Usage: "maker address, has to match the signing key",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "nonce",
 			Usage: "unused nonce for this maker (decimal uint64)",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "price",
 			Usage: "premium per unit (1e18), non zero",
 		},
-		&cli.Int64Flag{
+		&Int64Flag{
 			Name:  "valid_until",
 			Usage: "quote expiry in unix seconds, strictly between now+2min and now+10min",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:    "private_key",
 			Usage:   "private key to sign the quote with",
 			EnvVars: []string{"RYSK_PRIVATE_KEY"},
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "domain_name",
 			Value: PREMIUM_DOMAIN_NAME,
 			Usage: "EIP712 domain name",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "domain_version",
 			Value: PREMIUM_DOMAIN_VERSION,
 			Usage: "EIP712 domain version",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "domain_verifying_contract",
 			Usage: "EIP712 domain verifying contract: the pool's option handler, from the request's typeDataDomain",
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		return premiumQuote(c)
 	},
 }
@@ -335,7 +334,7 @@ func premiumStatusError(baseURL string, status int, body []byte) error {
 
 // premiumProxy runs a read and prints the api's response as it came, so callers
 // keep working when the api grows a field.
-func premiumProxy(c *cli.Context, method string, path string, query url.Values) error {
+func premiumProxy(c *Context, method string, path string, query url.Values) error {
 	client := newPremiumClient(c.String("url"))
 	status, body, err := client.do(method, path, query, nil, nil)
 	if err != nil {
@@ -351,7 +350,7 @@ func premiumProxy(c *cli.Context, method string, path string, query url.Values) 
 	return nil
 }
 
-func premiumCancel(c *cli.Context) error {
+func premiumCancel(c *Context) error {
 	nonce := c.String("nonce")
 	if _, err := strconv.ParseUint(nonce, 10, 64); err != nil {
 		return fmt.Errorf("invalid nonce %q: has to be a decimal uint64", nonce)
@@ -417,7 +416,7 @@ func premiumAuthTypedData(chainId int64, nonce string) *apitypes.TypedData {
 	}
 }
 
-func premiumQuote(c *cli.Context) error {
+func premiumQuote(c *Context) error {
 	privateKey := c.String("private_key")
 	if privateKey == "" {
 		return errors.New("missing private key")
@@ -461,7 +460,7 @@ func premiumQuote(c *cli.Context) error {
 
 // premiumQuoteInputs collects the quotes to sign, either from a batch file or
 // from the per quote flags.
-func premiumQuoteInputs(c *cli.Context) ([]premiumQuoteInput, error) {
+func premiumQuoteInputs(c *Context) ([]premiumQuoteInput, error) {
 	batch := c.String("batch")
 	if batch == "" {
 		return []premiumQuoteInput{{

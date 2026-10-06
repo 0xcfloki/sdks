@@ -6,46 +6,45 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/urfave/cli/v2"
 )
 
-var approveAction = &cli.Command{
+var approveAction = &Command{
 	Name:  "approve",
 	Usage: "approve spending of default strike asset",
-	Flags: []cli.Flag{
-		&cli.Int64Flag{
+	Flags: []Flag{
+		&Int64Flag{
 			Name:     "chain_id",
 			Required: true,
 			Usage:    "chain_id",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "rpc_url",
 			Required: true,
 			Usage:    "rpc url",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "amount",
 			Required: true,
 			Usage:    "amount to approve",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "private_key",
 			Required: true,
 			Usage:    "private key of approving account",
 			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "asset",
 			Required: false,
 			Usage:    "address of the asset to approve (defaults to the chain's strike asset)",
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		return approve(c)
 	},
 }
 
-func approve(c *cli.Context) error {
+func approve(c *Context) error {
 	chain_id := c.Int("chain_id")
 	rpc_url := c.String("rpc_url")
 	amount := c.String("amount")

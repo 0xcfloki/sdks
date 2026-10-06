@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"math/big"
 	"net/http"
@@ -15,7 +16,6 @@ import (
 	crypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 	"github.com/goccy/go-json"
-	"github.com/urfave/cli/v2"
 )
 
 const testPrivateKey = "4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318"
@@ -75,13 +75,7 @@ func testPremiumQuoteInput(t *testing.T) premiumQuoteInput {
 
 // runPremium drives the command the way the binary does, flags and all.
 func runPremium(args ...string) error {
-	app := &cli.App{
-		Name:      "ryskV12",
-		Commands:  []*cli.Command{premiumAction},
-		Writer:    io.Discard,
-		ErrWriter: io.Discard,
-	}
-	return app.Run(append([]string{"ryskV12", "premium"}, args...))
+	return premiumAction.Run(context.Background(), args)
 }
 
 // captureStdout collects what a command prints, since the api's response is the
