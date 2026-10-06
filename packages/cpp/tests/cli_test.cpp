@@ -17,12 +17,14 @@
 #include <fstream>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "harness.hpp"
 #include "ryskv12/client.hpp"
+#include "ryskv12/json.hpp"
 
 using namespace ryskv12;
 
@@ -351,6 +353,32 @@ TEST(run_lines_hands_over_each_line_as_it_arrives) {
   CHECK_EQ(code, 0);
   CHECK_MSG(!lines.empty(), "no lines delivered");
   if (!lines.empty()) CHECK_MSG(!lines[0].empty(), "first line was empty");
+}
+
+// cat stands in for connect: what send writes is exactly what comes back, so
+// this pins the wire format - one json array of args per line.
+TEST(send_writes_each_command_as_one_json_line) {
+  Rysk::Options options;
+  options.cli_path = "/bin/cat";
+  options.skip_version_check = true;
+  Rysk rysk(Env::Testnet, PK, options);
+
+  std::vector<std::string> args{"quote", "--rfq_id", "a \"quoted\"\nid", "--is_put"};
+  std::optional<Json> echoed;
+  {
+    Process process = rysk.spawn({});  // no args: cat echoes stdin
+    process.send(args);
+    std::thread reader([&] {
+      process.read_lines([&](const std::string& line) {
+        echoed = Json::parse(line);
+        process.kill();
+      });
+    });
+    reader.join();
+  }  // the destructor reaps without hanging
+
+  CHECK_MSG(echoed.has_value(), "nothing came back");
+  if (echoed) CHECK_MSG(*echoed == Json(Json::Array(args.begin(), args.end())), echoed->dump());
 }
 
 HARNESS_MAIN()

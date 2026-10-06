@@ -42,10 +42,10 @@ const fakeApi = async (respond) => {
 
 const run = (sdk, args) =>
   new Promise((resolve) => {
-    const proc = sdk.execute(args.filter((arg) => arg !== ""));
+    const proc = sdk.execute(args);
     let stdout = "";
     let stderr = "";
-    proc.on("message", (data) => (stdout += data.toString()));
+    proc.on("message", (line) => (stdout += line.toString() + "\n"));
     proc.on("stderr", (data) => (stderr += data.toString()));
     proc.on("close", (code) => resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() }));
   });

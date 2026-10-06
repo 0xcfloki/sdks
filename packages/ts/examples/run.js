@@ -1,6 +1,6 @@
 // Market maker loop for the websocket flow: hold a maker connection open, listen
 // for RFQs on an asset, price them, and send signed quotes back through the
-// maker channel.
+// maker connection.
 //
 //   RYSK_SDK_PK=<hex private key> \
 //   RYSK_MAKER=0x<maker address> \
@@ -18,8 +18,6 @@ const PK = process.env.RYSK_SDK_PK;
 const MAKER = process.env.RYSK_MAKER;
 const ASSET = process.env.RYSK_ASSET || "0x5555555555555555555555555555555555555555";
 
-const MAKER_CHANNEL = "MAKER_CHAN";
-const RFQ_CHANNEL = "RFQ_CHAN";
 const QUOTE_VALIDITY_SECONDS = 30;
 // one counter per signing key, shared by quotes and cancels
 const nonces = new NonceCounter(".rysk-nonce");
@@ -66,8 +64,8 @@ const main = () => {
 
   // The maker connection is what quotes and transfers are written into; it has
   // to stay open for the whole session.
-  const makerProc = sdk.execute(sdk.connectArgs(MAKER_CHANNEL, "maker"));
-  makerProc.on("open", () => console.log("maker channel connected"));
+  const makerProc = sdk.execute(sdk.connectArgs("maker"));
+  makerProc.on("open", () => console.log("maker connected"));
   makerProc.onmessage = (data) => {
     const payload = data.toString().trim();
     if (!payload) return;
@@ -95,15 +93,11 @@ const main = () => {
   makerProc.on("stderr", (data) => console.error("maker log:", data.toString().trim()));
   makerProc.on("error", (err) => console.error("maker process failed:", err.toString()));
 
-  const quote = (id, request) => {
-    const proc = sdk.execute(sdk.quoteArgs(MAKER_CHANNEL, id, buildQuote(request)));
-    proc.on("message", (data) => console.log("quote:", data.toString().trim()));
-    proc.on("stderr", (data) => console.error("quote log:", data.toString().trim()));
-    // a rejected quote is a non-zero exit code, not an "error" event
-    proc.on("close", (code) => code !== 0 && console.error(`quote exited ${code}`));
-  };
+  // The maker connection signs and sends the quote itself; a quote it cannot
+  // sign is logged on its stderr.
+  const quote = (id, request) => makerProc.send(sdk.quoteArgs(id, buildQuote(request)));
 
-  const rfqProc = sdk.execute(sdk.connectArgs(RFQ_CHANNEL, `rfqs/${ASSET}`));
+  const rfqProc = sdk.execute(sdk.connectArgs(`rfqs/${ASSET}`));
   rfqProc.on("open", () => console.log(`listening for rfqs on ${ASSET}`));
   rfqProc.onmessage = (data) => {
     const payload = data.toString().trim();
@@ -125,14 +119,14 @@ const main = () => {
   rfqProc.on("stderr", (data) => console.error("rfq log:", data.toString().trim()));
   rfqProc.on("error", (err) => console.error("rfq process failed:", err.toString()));
 
-  // Account reads go through the maker channel like everything else.
-  sdk.execute(sdk.balancesArgs(MAKER_CHANNEL, MAKER));
-  sdk.execute(sdk.positionsArgs(MAKER_CHANNEL, MAKER));
+  // Account reads go through the maker connection like everything else.
+  makerProc.send(sdk.balancesArgs(MAKER));
+  makerProc.send(sdk.positionsArgs(MAKER));
 
   process.on("SIGINT", () => {
     console.log("\ndisconnecting");
-    sdk.execute(sdk.disconnectArgs(RFQ_CHANNEL));
-    sdk.execute(sdk.disconnectArgs(MAKER_CHANNEL));
+    rfqProc.close();
+    makerProc.close();
     setTimeout(() => process.exit(0), 500);
   });
 };

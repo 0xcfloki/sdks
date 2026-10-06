@@ -46,7 +46,7 @@ class Rysk:
     _env: Env
     _cli_path: str
     _private_key: str
-    _min_sdk_version: str = "4.0.0"
+    _min_sdk_version: str = "5.0.0"
 
     def __init__(
         self,
@@ -60,6 +60,7 @@ class Rysk:
         self._cli_path = v12_cli_path
         self._private_key = private_key
         self._strict_version = strict_version
+        self._readers = set()
         self._sdk_version_check()
 
     def _url(self, uri: str):
@@ -144,6 +145,7 @@ class Rysk:
         return Popen(
             [self._cli_path, *args],
             shell=False,
+            stdin=PIPE,
             stdout=PIPE,
             stderr=PIPE,
             text=True,
@@ -151,25 +153,42 @@ class Rysk:
         )
 
     async def execute_async(self, args: List[str] = [], callback = print):
+        """Spawns the CLI and returns the process straight away, handing each line
+        of its stdout to callback in the background. `await process.wait()` for
+        the exit code."""
         process = await asyncio.create_subprocess_exec(
             self._cli_path,
             *args,
+            stdin=PIPE,
             stdout=PIPE,
             stderr=PIPE,
             env=self._child_env(),
         )
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            callback(line)  
-        return await process.wait()
 
-    def connect_args(self, channel_id: str, uri: str):
-        return ["connect", "--channel_id", channel_id, "--url", self._url(uri)]
+        async def read():
+            while line := await process.stdout.readline():
+                callback(line)
 
-    def disconnect_args(self, channel_id: str):
-        return ["disconnect", "--channel_id", channel_id]
+        # the loop only holds tasks weakly, so keep this one until it finishes
+        reader = asyncio.create_task(read())
+        self._readers.add(reader)
+        reader.add_done_callback(self._readers.discard)
+        return process
+
+    def send(self, process, args: List[str]):
+        """Writes a command - quote, transfer, balances or positions args - into
+        a running connect, which signs and sends it over its websocket: no
+        process per command. Takes a process from execute or execute_async.
+        Disconnect with `process.terminate()`."""
+        line = json.dumps(args) + "\n"
+        if isinstance(process, Popen):
+            process.stdin.write(line)
+            process.stdin.flush()
+        else:
+            process.stdin.write(line.encode())
+
+    def connect_args(self, uri: str):
+        return ["connect", "--url", self._url(uri)]
 
     def approve_args(
         self, chain_id: int, amount: str, rpc_url: str, asset: Optional[str] = None
@@ -190,14 +209,12 @@ class Rysk:
             base += ["--asset", asset]
         return base
 
-    def balances_args(self, channel_id: str, account: str):
-        return ["balances", "--channel_id", channel_id, "--account", account]
+    def balances_args(self, account: str):
+        return ["balances", "--account", account]
 
-    def transfer_args(self, channel_id: str, transfer: Transfer):
+    def transfer_args(self, transfer: Transfer):
         base = [
             "transfer",
-            "--channel_id",
-            channel_id,
             "--chain_id",
             str(transfer.chain_id),
             "--user",
@@ -213,8 +230,8 @@ class Rysk:
             base.append("--is_deposit")
         return base
 
-    def positions_args(self, channel_id: str, account: str):
-        return ["positions", "--channel_id", channel_id, "--account", account]
+    def positions_args(self, account: str):
+        return ["positions", "--account", account]
 
     def _premium_url_args(self, url: Optional[str]) -> List[str]:
         """Base url of the premium rfq api. Left out of the args when not given,
@@ -339,11 +356,9 @@ class Rysk:
             *self._premium_url_args(url),
         ]
 
-    def quote_args(self, channel_id: str, rfq_id: str, quote: Quote):
+    def quote_args(self, rfq_id: str, quote: Quote):
         base = [
             "quote",
-            "--channel_id",
-            channel_id,
             "--rfq_id",
             rfq_id,
             "--asset",

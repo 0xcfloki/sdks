@@ -1,5 +1,6 @@
 import { ChildProcess, exec, spawn } from "child_process";
 import { EventEmitter } from "events";
+import { createInterface } from "readline";
 import Stream from "stream";
 
 import { HexString, Quote, Transfer } from "./models";
@@ -24,14 +25,17 @@ class CliWebSocket extends EventEmitter {
     this.stdout = this._childProcess.stdout;
     this.stderr = this._childProcess.stderr;
 
-    // Handle stdout data as "messages"
-    this._childProcess?.stdout?.on("data", (data: Buffer) => {
-      this.emit("message", data); // Assuming text messages
-    });
+    // The CLI prints one message per line, and a chunk of stdout can hold
+    // several or part of one, so each line is a message.
+    if (this._childProcess.stdout) {
+      createInterface({ input: this._childProcess.stdout }).on("line", (line) =>
+        this.emit("message", Buffer.from(line)),
+      );
+    }
 
-    // The CLI logs to stderr, so it is not an error channel: a failed command is
-    // a non-zero exit code, and "error" is reserved for the process itself
-    // failing.
+    // The CLI logs to stderr, so it is not an error channel: a failed command
+    // is a json-rpc error message (or, run on its own, a non-zero exit code),
+    // and "error" is reserved for the process itself failing.
     this._childProcess?.stderr?.on("data", (data: Buffer) => {
       this.emit("stderr", data);
     });
@@ -67,6 +71,15 @@ class CliWebSocket extends EventEmitter {
     this.readyState = ReadyState.CLOSING;
     this._childProcess?.kill("SIGTERM"); // Send termination signal
     // The 'close' event listener will handle the state change to CLOSED
+  }
+
+  /**
+   * Sends a command into a running `connect`: `args` as the CLI would take
+   * them, e.g. `sdk.quoteArgs(...)`. The connection signs and sends it itself,
+   * so no process is spawned per command.
+   */
+  public send(args: Array<string>): void {
+    this._childProcess?.stdin?.write(JSON.stringify(args) + "\n");
   }
 
   // Mimic WebSocket event handlers for convenience, though EventEmitter is primary
@@ -142,7 +155,7 @@ class Rysk {
   private _env: Env;
   private _cli_path: string;
   private _private_key: string;
-  private _minSdkVersion: string = "4.0.0";
+  private _minSdkVersion: string = "5.0.0";
   private _strictVersion: boolean;
 
   /**
@@ -217,12 +230,13 @@ class Rysk {
     return new CliWebSocket(childProcess);
   }
 
-  public connectArgs(channelId: string, uri: string) {
-    return ["connect", "--channel_id", channelId, "--url", this._url(uri)];
-  }
-
-  public disconnectArgs(channelId: string) {
-    return ["disconnect", "--channel_id", channelId];
+  /**
+   * Holds a websocket open. Its stdout carries the server's messages; send it
+   * the balances, positions, transfer and quote args with `send`, and end it
+   * with `close`.
+   */
+  public connectArgs(uri: string) {
+    return ["connect", "--url", this._url(uri)];
   }
 
   /**
@@ -247,15 +261,13 @@ class Rysk {
     ];
   }
 
-  public balancesArgs(channelId: string, account: string) {
-    return ["balances", "--channel_id", channelId, "--account", account];
+  public balancesArgs(account: string) {
+    return ["balances", "--account", account];
   }
 
-  public transferArgs(channelId: string, transfer: Transfer) {
+  public transferArgs(transfer: Transfer) {
     return [
       "transfer",
-      "--channel_id",
-      channelId,
       "--chain_id",
       transfer.chain_id.toString(),
       "--user",
@@ -266,12 +278,12 @@ class Rysk {
       transfer.amount,
       "--nonce",
       transfer.nonce,
-      transfer.is_deposit ? "--is_deposit" : "",
+      ...(transfer.is_deposit ? ["--is_deposit"] : []),
     ];
   }
 
-  public positionsArgs(channelId: string, account: string) {
-    return ["positions", "--channel_id", channelId, "--account", account];
+  public positionsArgs(account: string) {
+    return ["positions", "--account", account];
   }
 
   /**
@@ -423,8 +435,8 @@ class Rysk {
       quote.validUntil.toString(),
       ...this._premiumDomainArgs(quote),
       ...this._premiumURLArgs(url),
-      quote.isPut ? "--is_put" : "",
-      quote.isTakerBuy ? "--is_taker_buy" : "",
+      ...(quote.isPut ? ["--is_put"] : []),
+      ...(quote.isTakerBuy ? ["--is_taker_buy"] : []),
     ];
   }
 
@@ -478,11 +490,9 @@ class Rysk {
     ];
   }
 
-  public quoteArgs(channelId: string, rfqId: string, quote: Quote) {
+  public quoteArgs(rfqId: string, quote: Quote) {
     return [
       "quote",
-      "--channel_id",
-      channelId,
       "--rfq_id",
       rfqId,
       "--asset",
@@ -509,8 +519,8 @@ class Rysk {
       quote.collateralAsset,
       ...(quote.premiumAsset ? ["--premium_asset", quote.premiumAsset] : []),
       ...this._domainArgs(quote),
-      quote.isPut ? "--is_put" : "",
-      quote.isTakerBuy ? "--is_taker_buy" : "",
+      ...(quote.isPut ? ["--is_put"] : []),
+      ...(quote.isTakerBuy ? ["--is_taker_buy"] : []),
     ];
   }
 }

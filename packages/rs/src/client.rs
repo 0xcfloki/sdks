@@ -1,5 +1,5 @@
-use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, Command, Stdio};
 
 use crate::error::Error;
 use crate::models::{Quote, Transfer, TypedDataDomain};
@@ -8,7 +8,7 @@ pub const RELEASES_URL: &str = "https://github.com/rysk-finance/sdks/releases";
 
 /// Oldest cli this sdk will not warn about. Kept in step with the other sdks'
 /// `_minSdkVersion` / `_min_sdk_version`.
-const MIN_CLI_VERSION: (u64, u64, u64) = (4, 0, 0);
+const MIN_CLI_VERSION: (u64, u64, u64) = (5, 0, 0);
 
 const DEFAULT_CLI_PATH: &str = "./ryskV12";
 
@@ -60,6 +60,21 @@ fn take_leading_digits(s: &str) -> Option<u64> {
 fn pair(args: &mut Vec<String>, flag: &str, value: impl AsRef<str>) {
     args.push(flag.to_string());
     args.push(value.as_ref().to_string());
+}
+
+/// Writes one command into a running `connect`, which signs it and sends it over
+/// its websocket - no process per command. `args` are what a `*_args` builder
+/// returns, e.g. [`Rysk::quote_args`].
+///
+/// Take `child.stdin` from a connect spawned with [`Rysk::execute`] and keep it.
+/// Dropping it stops further commands but not the connection; `child.kill()`
+/// disconnects. A command the cli rejects comes back on stdout as a json-rpc
+/// error, under the id the server would have answered with.
+pub fn send(stdin: &mut ChildStdin, args: &[String]) -> Result<(), Error> {
+    let mut line = serde_json::to_string(args)?;
+    line.push('\n');
+    stdin.write_all(line.as_bytes())?;
+    Ok(stdin.flush()?)
 }
 
 /// Builds argument lists for the `ryskV12` cli and spawns it.
@@ -139,6 +154,7 @@ impl Rysk {
         let mut cmd = Command::new(&self.cli_path);
         cmd.args(args)
             .env("RYSK_PRIVATE_KEY", &self.private_key)
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         cmd
@@ -152,6 +168,9 @@ impl Rysk {
     /// Spawns the cli and hands each line of its stdout to `on_line`, returning
     /// the exit status once it closes. This is the blocking twin of the other
     /// sdks' `execute_async`.
+    ///
+    /// The child keeps its stdin, so a connect run through this stays up but only
+    /// listens: to [`send`] it commands, spawn it with [`Rysk::execute`] instead.
     pub fn execute_lines(
         &self,
         args: &[String],
@@ -172,8 +191,6 @@ impl Rysk {
     /// This blocks: the sdk cannot spawn a binary that is still downloading.
     #[cfg(unix)]
     pub fn setup(&self) -> Result<String, Error> {
-        use std::io::Write;
-
         // The script ships inside the crate, so it is written out and run rather
         // than shelled out to from a path that only exists in a repo checkout.
         let mut child = Command::new("sh")
@@ -260,22 +277,9 @@ impl Rysk {
 
     // ----------------------------------------------------------- arg builders
 
-    pub fn connect_args(&self, channel_id: &str, uri: &str) -> Vec<String> {
-        vec![
-            "connect".into(),
-            "--channel_id".into(),
-            channel_id.into(),
-            "--url".into(),
-            self.url(uri),
-        ]
-    }
-
-    pub fn disconnect_args(&self, channel_id: &str) -> Vec<String> {
-        vec![
-            "disconnect".into(),
-            "--channel_id".into(),
-            channel_id.into(),
-        ]
+    /// Commands for this connection go in on its stdin, through [`send`].
+    pub fn connect_args(&self, uri: &str) -> Vec<String> {
+        vec!["connect".into(), "--url".into(), self.url(uri)]
     }
 
     /// `asset` is the erc20 to approve. Left out, the cli falls back to the
@@ -297,29 +301,16 @@ impl Rysk {
         args
     }
 
-    pub fn balances_args(&self, channel_id: &str, account: &str) -> Vec<String> {
-        vec![
-            "balances".into(),
-            "--channel_id".into(),
-            channel_id.into(),
-            "--account".into(),
-            account.into(),
-        ]
+    pub fn balances_args(&self, account: &str) -> Vec<String> {
+        vec!["balances".into(), "--account".into(), account.into()]
     }
 
-    pub fn positions_args(&self, channel_id: &str, account: &str) -> Vec<String> {
-        vec![
-            "positions".into(),
-            "--channel_id".into(),
-            channel_id.into(),
-            "--account".into(),
-            account.into(),
-        ]
+    pub fn positions_args(&self, account: &str) -> Vec<String> {
+        vec!["positions".into(), "--account".into(), account.into()]
     }
 
-    pub fn transfer_args(&self, channel_id: &str, transfer: &Transfer) -> Vec<String> {
+    pub fn transfer_args(&self, transfer: &Transfer) -> Vec<String> {
         let mut args = vec!["transfer".to_string()];
-        pair(&mut args, "--channel_id", channel_id);
         pair(&mut args, "--chain_id", transfer.chain_id.to_string());
         pair(&mut args, "--user", &transfer.user);
         pair(&mut args, "--asset", &transfer.asset);
@@ -331,14 +322,8 @@ impl Rysk {
         args
     }
 
-    pub fn quote_args(
-        &self,
-        channel_id: &str,
-        rfq_id: &str,
-        quote: &Quote,
-    ) -> Result<Vec<String>, Error> {
+    pub fn quote_args(&self, rfq_id: &str, quote: &Quote) -> Result<Vec<String>, Error> {
         let mut args = vec!["quote".to_string()];
-        pair(&mut args, "--channel_id", channel_id);
         pair(&mut args, "--rfq_id", rfq_id);
         pair(&mut args, "--asset", &quote.asset_address);
         pair(&mut args, "--chain_id", quote.chain_id.to_string());
@@ -599,7 +584,7 @@ mod tests {
     #[test]
     fn version_ordering_is_numeric_not_lexical() {
         assert!(parse_version("4.10.0") > parse_version("4.9.0"));
-        assert!(parse_version("3.2.0") < Some(MIN_CLI_VERSION));
-        assert!(parse_version("4.0.0") >= Some(MIN_CLI_VERSION));
+        assert!(parse_version("4.9.9") < Some(MIN_CLI_VERSION));
+        assert!(parse_version("5.0.0") >= Some(MIN_CLI_VERSION));
     }
 }

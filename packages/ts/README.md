@@ -16,9 +16,11 @@ If the script fails to do so please navigate to https://github.com/rysk-finance/
 | Event | Handler | Carries |
 | --- | --- | --- |
 | `open` | `onopen` | the process was spawned |
-| `message` | `onmessage` | a chunk of the CLI's stdout |
+| `message` | `onmessage` | one line of the CLI's stdout: one message |
 | `stderr` | `onstderr` | a chunk of the CLI's stderr — the CLI logs there, so this is not a failure |
-| `close` | `onclose` | the exit code; a non-zero one is how a command reports failure |
+| `close` | `onclose` | the exit code; a non-zero one is how a command run on its own reports failure |
+
+`send(args)` writes a command into a running `connect` (see below), and `close()` ends the process.
 | `error` | `onerror` | the process itself failed to spawn or run |
 
 ### Core `execute` method
@@ -62,23 +64,19 @@ built CLI reports no version number and is left alone.
 ### Create a Connection
 
 ```ts
-const rfqChannel = "my-rfq-channel-id";
-const rfqURI = "rfqs/<assetAddress>"; // Example websocket endpoint
-
-const rfqProc = ryskSDK.execute(ryskSDK.connectArgs(rfqChannel, rfqURI));
-
-const makerChannel = "maker-channel";
-const makerURI = "maker";
-
-const makerProc = ryskSDK.execute(ryskSDK.connectArgs(makerChannel, makerURI));
+const rfqProc = ryskSDK.execute(ryskSDK.connectArgs("rfqs/<assetAddress>"));
+const makerProc = ryskSDK.execute(ryskSDK.connectArgs("maker"));
 ```
+
+Balances, positions, transfers and quotes are sent into a connection with `send`: the running
+`connect` signs and sends each one itself, so no process is spawned per command. A command it cannot
+run comes back as a `message`: a json-rpc error under the id the server would have used (the
+rfq id for a quote, the command name otherwise), so `isErrorData` catches it with the server's.
 
 ### Disconnect
 
 ```ts
-const makerChannel = "maker-channel";
-
-ryskSDK.execute(ryskSDK.disconnectArgs(makerChannel));
+makerProc.close();
 ```
 
 ### Approve spending
@@ -104,16 +102,12 @@ const proc = ryskSDK.execute(
 ### List USDC Balances
 
 ```ts
-const makerChannel = "maker-channel";
-const account = "0xabc";
-
-const proc = ryskSDK.execute(ryskSDK.balancesArgs(makerChannel, account));
+makerProc.send(ryskSDK.balancesArgs("0xabc"));
 ```
 
 ### Deposit / Withdraw
 
 ```ts
-const makerChannel = "maker-channel";
 const transferDetails: Transfer = {
   amount: "500000",
   asset: "0x...", // The asset address
@@ -122,24 +116,18 @@ const transferDetails: Transfer = {
   nonce: "some-unique-nonce",
 };
 
-const proc = ryskSDK.execute(
-  ryskSDK.transferArgs(makerChannel, transferDetails)
-);
+makerProc.send(ryskSDK.transferArgs(transferDetails));
 ```
 
 ### List Positions
 
 ```ts
-const makerChannel = "maker-channel";
-const account = "0xabc";
-
-const proc = ryskSDK.execute(ryskSDK.positionsArgs(makerChannel, account));
+makerProc.send(ryskSDK.positionsArgs("0xabc"));
 ```
 
 ### Send a Quote
 
 ```ts
-const makerChannel = "maker-channel";
 const request_id = "some-uuid-from-server";
 const quoteDetails: Quote = {
   assetAddress: "0x...",
@@ -162,9 +150,7 @@ const quoteDetails: Quote = {
   domain: request.typeDataDomain,
 };
 
-const proc = ryskSDK.execute(
-  ryskSDK.quoteArgs(makerChannel, request_id, quoteDetails)
-);
+makerProc.send(ryskSDK.quoteArgs(request_id, quoteDetails));
 ```
 
 `domain` needs `name`, `version` and `verifyingContract` together; its `chainId`
@@ -173,7 +159,7 @@ always comes from the quote, so a domain for another chain - or one carrying a
 
 ### Premium RFQ (maker)
 
-The premium RFQ api is plain HTTP, so these need no connection and no channel: each one runs the CLI
+The premium RFQ api is plain HTTP, so these need no connection: each one runs the CLI
 once and prints the api's response on stdout. `url` is optional — leave it out for production, pass
 it for a local or staging api.
 
@@ -222,7 +208,7 @@ Two runnable maker loops live in `examples/`, one per transport:
 
 | File | What it does |
 | --- | --- |
-| `examples/run.js` | Websocket flow: holds the maker connection open, listens for RFQs on an asset, prices them and sends signed quotes back through the maker channel. Also reads balances and positions, and disconnects both channels on `SIGINT`. |
+| `examples/run.js` | Websocket flow: holds the maker connection open, listens for RFQs on an asset, prices them and sends them into the maker connection, which signs and sends each quote. Also reads balances and positions, and closes both connections on `SIGINT`. |
 | `examples/premium.js` | Premium RFQ flow: polls the requests this maker may quote, prices them, posts the batch in one api call, matches quote ids back from the listing, refreshes each quote before its 10 minute window closes, and pulls everything on `SIGINT`. |
 
 ```sh

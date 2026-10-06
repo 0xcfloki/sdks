@@ -2,6 +2,7 @@
 
 #include <array>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -37,6 +38,42 @@ struct Output {
   std::string err;
 };
 
+class Rysk;
+
+/// A running cli: what `connect` returns, so commands can be written into it.
+///
+/// Join any thread inside read_lines before this is destroyed.
+class Process {
+ public:
+  Process(Process&& other) noexcept;
+  Process& operator=(Process&&) = delete;
+  Process(const Process&) = delete;
+  Process& operator=(const Process&) = delete;
+  /// Kills the cli if it is still running, and reaps it.
+  ~Process();
+
+  /// Writes `args` to the cli's stdin as one json array line - how a `connect`
+  /// is told to sign and send a quote, transfer, balances or positions. Safe to
+  /// call from several threads. Throws Error once the cli is gone.
+  void send(const std::vector<std::string>& args);
+
+  /// Hands each line of stdout to `on_line` until the cli exits, returning its
+  /// exit code. stderr, where the cli logs, is drained and dropped.
+  int read_lines(const std::function<void(const std::string&)>& on_line);
+
+  /// SIGTERM: this is how a connection is disconnected.
+  void kill();
+
+ private:
+  friend class Rysk;
+  struct State;
+  explicit Process(std::unique_ptr<State> state);
+  void close_stdin();
+  Output drain(const std::function<void(const std::string&)>* on_line);
+
+  std::unique_ptr<State> state_;
+};
+
 /// Builds argument lists for the `ryskV12` cli and spawns it.
 ///
 /// Every `*_args` method is pure: it returns what the cli would be given
@@ -59,9 +96,8 @@ class Rysk {
 
   // ------------------------------------------------------------ arg builders
 
-  std::vector<std::string> connect_args(const std::string& channel_id,
-                                        const std::string& uri) const;
-  std::vector<std::string> disconnect_args(const std::string& channel_id) const;
+  /// A connection to `uri`. Spawn it, then `send` it the four commands below.
+  std::vector<std::string> connect_args(const std::string& uri) const;
 
   /// `asset` is the erc20 to approve. Left out, the cli falls back to the
   /// chain's strike asset.
@@ -69,16 +105,12 @@ class Rysk {
                                         const std::string& rpc_url,
                                         std::optional<std::string> asset = std::nullopt) const;
 
-  std::vector<std::string> balances_args(const std::string& channel_id,
-                                         const std::string& account) const;
-  std::vector<std::string> positions_args(const std::string& channel_id,
-                                          const std::string& account) const;
-  std::vector<std::string> transfer_args(const std::string& channel_id,
-                                         const Transfer& transfer) const;
+  std::vector<std::string> balances_args(const std::string& account) const;
+  std::vector<std::string> positions_args(const std::string& account) const;
+  std::vector<std::string> transfer_args(const Transfer& transfer) const;
 
   /// Throws Error when the quote's domain is one the cli could not sign.
-  std::vector<std::string> quote_args(const std::string& channel_id, const std::string& rfq_id,
-                                      const Quote& quote) const;
+  std::vector<std::string> quote_args(const std::string& rfq_id, const Quote& quote) const;
 
   // ------------------------------------------------------------- premium rfq
 
@@ -111,6 +143,10 @@ class Rysk {
   /// argument, so it never shows up in ps or a shell history. Spawning the cli
   /// yourself means setting that variable too.
   Output run(const std::vector<std::string>& args) const;
+
+  /// Starts the cli and returns while it runs, for a `connect` that commands
+  /// are sent into. The key travels as it does for `run`.
+  Process spawn(const std::vector<std::string>& args) const;
 
   /// Runs the cli and hands each line of its stdout to `on_line` as it arrives,
   /// returning the exit code once it closes.

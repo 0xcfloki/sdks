@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -81,13 +82,12 @@ def test_no_arg_builder_carries_the_private_key(sdk):
     premium_quote = quote(domain=TypedDataDomain(verifyingContract=HANDLER))
 
     builders = [
-        sdk.connect_args("chan", "maker"),
-        sdk.disconnect_args("chan"),
+        sdk.connect_args("maker"),
         sdk.approve_args(84532, "1", "https://rpc"),
-        sdk.balances_args("chan", MAKER),
-        sdk.positions_args("chan", MAKER),
-        sdk.transfer_args("chan", transfer),
-        sdk.quote_args("chan", "rfq", quote()),
+        sdk.balances_args(MAKER),
+        sdk.positions_args(MAKER),
+        sdk.transfer_args(transfer),
+        sdk.quote_args("rfq", quote()),
         sdk.premium_requests_args(MAKER),
         sdk.premium_quotes_args(MAKER),
         sdk.premium_quote_status_args("id"),
@@ -101,19 +101,37 @@ def test_no_arg_builder_carries_the_private_key(sdk):
         assert "test-key" not in args, args[:2]
 
 
-def test_connect_and_disconnect(sdk):
-    assert sdk.connect_args("chan", "maker") == [
+def test_connect(sdk):
+    assert sdk.connect_args("maker") == [
         "connect",
-        "--channel_id",
-        "chan",
         "--url",
         "wss://rip-testnet.rysk.finance/maker",
     ]
-    assert sdk.disconnect_args("chan") == ["disconnect", "--channel_id", "chan"]
+
+
+def test_send_writes_one_json_line_per_command():
+    """cat stands in for connect: whatever send writes comes straight back."""
+    sdk = Rysk(Env.TESTNET, "test-key", v12_cli_path="cat")
+    args = sdk.balances_args(MAKER)
+
+    proc = sdk.execute([])
+    sdk.send(proc, args)
+    assert json.loads(proc.stdout.readline()) == args
+    proc.terminate()
+
+    async def via_async():
+        lines = []
+        proc = await sdk.execute_async([], lines.append)
+        sdk.send(proc, args)
+        proc.stdin.close()
+        await asyncio.gather(*sdk._readers)  # the reader ends at eof
+        return lines
+
+    assert [json.loads(line) for line in asyncio.run(via_async())] == [args]
 
 
 def test_quote_passes_terms_and_flags(sdk):
-    args = sdk.quote_args("chan", "rfq-1", quote(isTakerBuy=True))
+    args = sdk.quote_args("rfq-1", quote(isTakerBuy=True))
 
     assert flag_value(args, "--rfq_id") == "rfq-1"
     assert flag_value(args, "--asset") == ASSET
@@ -122,15 +140,15 @@ def test_quote_passes_terms_and_flags(sdk):
     assert "--is_put" in args
     assert "--is_taker_buy" in args
 
-    call = sdk.quote_args("chan", "rfq-1", quote(isPut=False, isTakerBuy=False))
+    call = sdk.quote_args("rfq-1", quote(isPut=False, isTakerBuy=False))
     assert "--is_put" not in call
     assert "--is_taker_buy" not in call
 
 
 def test_quote_sends_premium_asset_only_when_set(sdk):
-    with_asset = sdk.quote_args("chan", "rfq", quote(premiumAsset=HANDLER))
+    with_asset = sdk.quote_args("rfq", quote(premiumAsset=HANDLER))
     assert flag_value(with_asset, "--premium_asset") == HANDLER
-    assert "--premium_asset" not in sdk.quote_args("chan", "rfq", quote())
+    assert "--premium_asset" not in sdk.quote_args("rfq", quote())
 
 
 def test_premium_quote_carries_domain_and_request_id(sdk):
@@ -178,7 +196,7 @@ def test_premium_accepts_a_matching_hex_chain_id(sdk):
 
 def test_websocket_quote_needs_a_whole_domain(sdk):
     with pytest.raises(ValueError, match="missing version, verifyingContract"):
-        sdk.quote_args("chan", "rfq", quote(domain=TypedDataDomain(name="rysk")))
+        sdk.quote_args("rfq", quote(domain=TypedDataDomain(name="rysk")))
 
 
 def test_premium_defaults_the_domain_name(sdk):

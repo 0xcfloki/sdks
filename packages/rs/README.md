@@ -11,7 +11,7 @@ three sdks agree on flags by construction.
 
 ```toml
 [dependencies]
-ryskv12 = "4"
+ryskv12 = "5"
 ```
 
 The cli binary is not bundled. Either download it from
@@ -59,6 +59,33 @@ let status = sdk.execute_lines(&args, |line| println!("{line}"))?;
 
 Every `*_args` method is pure: it returns what the cli would be given without
 running anything, so you can assert on the whole surface without a binary.
+
+## The websocket flow
+
+Spawn `connect` once per endpoint and keep it. Websocket commands - quotes,
+transfers, balances, positions - are written to its stdin with `ryskv12::send`: the
+running cli signs each one and sends it, no process per command.
+
+```rust
+use std::io::{BufRead, BufReader};
+
+let mut maker = sdk.execute(&sdk.connect_args("maker"))?;
+let mut commands = maker.stdin.take().unwrap();
+let replies = BufReader::new(maker.stdout.take().unwrap());
+
+ryskv12::send(&mut commands, &sdk.balances_args(&maker_address))?;
+ryskv12::send(&mut commands, &sdk.quote_args(&rfq_id, &quote)?)?;
+for line in replies.lines() {
+    println!("{}", line?); // one json-rpc message per line
+}
+
+maker.kill()?; // disconnect
+```
+
+A listen-only connection, like `connect_args(&format!("rfqs/{asset}"))`, can go
+through `execute_lines` instead. A command the cli rejects comes back on
+stdout as a json-rpc error under the id the server would have used; the
+connection stays up.
 
 ## Approving and depositing
 

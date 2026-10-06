@@ -332,3 +332,23 @@ fn the_key_travels_in_the_environment_not_argv() {
         calls[0].headers.keys().collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn send_writes_one_json_line_of_args() {
+    // cat stands in for connect: what goes in on stdin comes straight back
+    let mut child = std::process::Command::new("cat")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("cat must spawn");
+    let args: Vec<String> = vec!["quote".into(), "--rfq_id".into(), "a \"b\"\n".into()];
+    ryskv12::send(child.stdin.as_mut().unwrap(), &args).unwrap();
+
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    child.kill().ok();
+    child.wait().ok();
+    assert_eq!(serde_json::from_str::<Vec<String>>(&line).unwrap(), args);
+}

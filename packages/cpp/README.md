@@ -83,13 +83,22 @@ Pass one to approve or deposit any erc20:
 sdk.run(sdk.approve_args(84532, "1000000", rpc_url, asset));
 ```
 
-## Reading what comes back
+## Connections
+
+`connect` holds a websocket open. `spawn` it, and `send` it the signed commands
+(`quote_args`, `transfer_args`, `balances_args`, `positions_args`): each one
+goes in on the cli's stdin and is signed and sent by that same process, so
+nothing new is started per quote. `kill()` disconnects.
 
 The cli writes one json-rpc message per line. A failed call carries `error`
 instead of `result`, so read that first:
 
 ```cpp
-sdk.run_lines(sdk.connect_args(channel, "maker"), [](const std::string& line) {
+Process maker = sdk.spawn(sdk.connect_args("maker"));
+std::thread maker_reader([&] { maker.read_lines([](const std::string& line) { /* ... */ }); });
+
+Process rfqs = sdk.spawn(sdk.connect_args("rfqs/" + asset));
+rfqs.read_lines([&](const std::string& line) {
   auto res = JsonRpcResponse::parse(line);
   if (!res) return;
   if (res->error) {
@@ -97,10 +106,17 @@ sdk.run_lines(sdk.connect_args(channel, "maker"), [](const std::string& line) {
     return;
   }
   if (auto request = Request::from_json(*res->result)) {
-    // quote it
+    maker.send(sdk.quote_args(res->id, build_quote(*request)));
   }
 });
+
+maker.kill();
+maker_reader.join();
 ```
+
+`send` is safe from several threads. A command the cli rejects comes back as a
+line of its own: a json-rpc error under the id the server would have used. The
+connection stays up.
 
 `from_json` returns `nullopt` for a payload of the wrong shape — a missing
 required field, or one of the wrong type. That is what the `is_request` style

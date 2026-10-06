@@ -59,21 +59,10 @@ fn has(args: &[String], flag: &str) -> bool {
 // --------------------------------------------------------------------- basics
 
 #[test]
-fn connect_and_disconnect() {
-    let sdk = sdk();
+fn connect_addresses_the_env_url() {
     assert_eq!(
-        sdk.connect_args("chan", "maker"),
-        vec![
-            "connect",
-            "--channel_id",
-            "chan",
-            "--url",
-            "wss://rip-testnet.rysk.finance/maker"
-        ]
-    );
-    assert_eq!(
-        sdk.disconnect_args("chan"),
-        vec!["disconnect", "--channel_id", "chan"]
+        sdk().connect_args("maker"),
+        vec!["connect", "--url", "wss://rip-testnet.rysk.finance/maker"]
     );
 }
 
@@ -121,7 +110,7 @@ fn transfer_flags_a_deposit_but_not_a_withdrawal() {
         nonce: "1".into(),
     };
 
-    let deposit = sdk.transfer_args("chan", &base);
+    let deposit = sdk.transfer_args(&base);
     assert!(has(&deposit, "--is_deposit"));
     assert_eq!(flag_value(&deposit, "--chain_id"), "84532");
     assert_eq!(flag_value(&deposit, "--amount"), "1");
@@ -130,10 +119,7 @@ fn transfer_flags_a_deposit_but_not_a_withdrawal() {
         is_deposit: false,
         ..base
     };
-    assert!(!has(
-        &sdk.transfer_args("chan", &withdrawal),
-        "--is_deposit"
-    ));
+    assert!(!has(&sdk.transfer_args(&withdrawal), "--is_deposit"));
 }
 
 // ---------------------------------------------------------------------- quote
@@ -143,7 +129,6 @@ fn quote_passes_terms_and_flags() {
     let sdk = sdk();
     let args = sdk
         .quote_args(
-            "chan",
             "rfq-1",
             &Quote {
                 is_taker_buy: true,
@@ -161,7 +146,6 @@ fn quote_passes_terms_and_flags() {
 
     let neither = sdk
         .quote_args(
-            "chan",
             "rfq-1",
             &Quote {
                 is_put: false,
@@ -179,7 +163,6 @@ fn quote_sends_premium_asset_only_when_set() {
     let sdk = sdk();
     let with_asset = sdk
         .quote_args(
-            "chan",
             "rfq",
             &Quote {
                 premium_asset: Some(HANDLER.into()),
@@ -189,7 +172,7 @@ fn quote_sends_premium_asset_only_when_set() {
         .unwrap();
     assert_eq!(flag_value(&with_asset, "--premium_asset"), HANDLER);
 
-    let without = sdk.quote_args("chan", "rfq", &quote()).unwrap();
+    let without = sdk.quote_args("rfq", &quote()).unwrap();
     assert!(!has(&without, "--premium_asset"));
 }
 
@@ -197,7 +180,6 @@ fn quote_sends_premium_asset_only_when_set() {
 fn websocket_quote_needs_a_whole_domain() {
     let err = sdk()
         .quote_args(
-            "chan",
             "rfq",
             &Quote {
                 domain: Some(TypedDataDomain {
@@ -217,7 +199,7 @@ fn websocket_quote_needs_a_whole_domain() {
 
 #[test]
 fn websocket_quote_without_a_domain_sends_no_domain_flags() {
-    let args = sdk().quote_args("chan", "rfq", &quote()).unwrap();
+    let args = sdk().quote_args("rfq", &quote()).unwrap();
     assert!(!has(&args, "--domain_name"));
     assert!(!has(&args, "--domain_verifying_contract"));
 }
@@ -447,23 +429,19 @@ fn no_arg_builder_carries_the_private_key() {
     };
 
     let builders: Vec<Vec<String>> = vec![
-        sdk.connect_args("chan", "maker"),
-        sdk.disconnect_args("chan"),
+        sdk.connect_args("maker"),
         sdk.approve_args(84532, "1", "https://rpc", Some(ASSET)),
-        sdk.balances_args("chan", MAKER),
-        sdk.positions_args("chan", MAKER),
-        sdk.transfer_args(
-            "chan",
-            &Transfer {
-                user: MAKER.into(),
-                amount: "1".into(),
-                asset: ASSET.into(),
-                chain_id: 84532,
-                is_deposit: true,
-                nonce: "1".into(),
-            },
-        ),
-        sdk.quote_args("chan", "rfq", &with_domain).unwrap(),
+        sdk.balances_args(MAKER),
+        sdk.positions_args(MAKER),
+        sdk.transfer_args(&Transfer {
+            user: MAKER.into(),
+            amount: "1".into(),
+            asset: ASSET.into(),
+            chain_id: 84532,
+            is_deposit: true,
+            nonce: "1".into(),
+        }),
+        sdk.quote_args("rfq", &with_domain).unwrap(),
         sdk.premium_requests_args(MAKER, None),
         sdk.premium_quotes_args(MAKER, None),
         sdk.premium_quote_status_args("id", None),

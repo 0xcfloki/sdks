@@ -36,7 +36,7 @@ const runOnce = (args) =>
     const proc = sdk.execute(args.filter((arg) => arg !== ""));
     let stdout = "";
     let stderr = "";
-    proc.on("message", (data) => (stdout += data.toString()));
+    proc.on("message", (line) => (stdout += line.toString() + "\n"));
     // the CLI logs on stderr; a failure is the exit code, not this
     proc.on("stderr", (data) => (stderr += data.toString()));
     proc.on("error", (err) => (stderr += err.toString()));

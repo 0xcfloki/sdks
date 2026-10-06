@@ -1,6 +1,6 @@
 """Market maker loop for the websocket flow: hold a maker connection open, listen
 for RFQs on an asset, price them, and send signed quotes back through the maker
-channel.
+connection.
 
     RYSK_SDK_PK=<hex private key> \
     RYSK_MAKER=0x<maker address> \
@@ -30,13 +30,13 @@ PK = os.environ.get("RYSK_SDK_PK", "")
 MAKER = os.environ.get("RYSK_MAKER", "")
 ASSET = os.environ.get("RYSK_ASSET", "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f")
 
-MAKER_CHANNEL = "maker__py"
-RFQ_CHANNEL = f"{ASSET}__py"
 QUOTE_VALIDITY_SECONDS = 30
 # one counter per signing key, shared by quotes and cancels
 nonces = NonceCounter(".rysk-nonce")
 
 rysk_sdk = Rysk(env=Env.TESTNET, private_key=PK, v12_cli_path="./ryskV12cli")
+# the maker connection; quotes, balances and positions are written into it
+maker = None
 
 
 def price_request(request: Request) -> str:
@@ -71,12 +71,7 @@ def build_quote(request: Request) -> Quote:
 
 
 def quote(request_id: str, request: Request) -> None:
-    proc = rysk_sdk.execute(rysk_sdk.quote_args(MAKER_CHANNEL, request_id, build_quote(request)))
-    stdout, stderr = proc.communicate()
-    if stdout.strip():
-        print("quote:", stdout.strip())
-    if stderr.strip():
-        print("quote error:", stderr.strip())
+    rysk_sdk.send(maker, rysk_sdk.quote_args(request_id, build_quote(request)))
 
 
 def handle_maker_message(payload: bytes) -> None:
@@ -122,46 +117,30 @@ def handle_rfq_message(payload: bytes) -> None:
 
 
 async def process_rfqs() -> None:
-    try:
-        # The maker connection is what quotes and transfers are written into; it
-        # has to stay open for the whole session.
-        asyncio.create_task(
-            rysk_sdk.execute_async(
-                rysk_sdk.connect_args(MAKER_CHANNEL, "maker"), handle_maker_message
-            )
-        )
-        await asyncio.sleep(1)  # let the maker socket come up before quoting
+    global maker
+    # The maker connection is what quotes and transfers are written into; it has
+    # to stay open for the whole session. Commands sent before the websocket is
+    # up wait in its stdin.
+    maker = await rysk_sdk.execute_async(rysk_sdk.connect_args("maker"), handle_maker_message)
 
-        # Account reads go through the maker channel like everything else.
-        rysk_sdk.execute(rysk_sdk.balances_args(MAKER_CHANNEL, MAKER))
-        rysk_sdk.execute(rysk_sdk.positions_args(MAKER_CHANNEL, MAKER))
+    # Account reads go through the maker connection like everything else.
+    rysk_sdk.send(maker, rysk_sdk.balances_args(MAKER))
+    rysk_sdk.send(maker, rysk_sdk.positions_args(MAKER))
 
-        print(f"listening for rfqs on {ASSET}")
-        await rysk_sdk.execute_async(
-            rysk_sdk.connect_args(RFQ_CHANNEL, f"rfqs/{ASSET}"), handle_rfq_message
-        )
-    except Exception as e:
-        print(e)
-    finally:
-        rysk_sdk.execute(rysk_sdk.disconnect_args(RFQ_CHANNEL))
-        rysk_sdk.execute(rysk_sdk.disconnect_args(MAKER_CHANNEL))
+    rfq = await rysk_sdk.execute_async(rysk_sdk.connect_args(f"rfqs/{ASSET}"), handle_rfq_message)
+    print(f"listening for rfqs on {ASSET}")
 
+    def disconnect():
+        maker.terminate()
+        rfq.terminate()
 
-def handle_sig(sig, frame):
-    print("\ndisconnecting")
-    rysk_sdk.execute(rysk_sdk.disconnect_args(RFQ_CHANNEL))
-    rysk_sdk.execute(rysk_sdk.disconnect_args(MAKER_CHANNEL))
-    for channel in (RFQ_CHANNEL, MAKER_CHANNEL):
-        try:
-            os.remove(f"/tmp/{channel}.sock")
-        except FileNotFoundError:
-            pass
-    sys.exit(0)
+    asyncio.get_running_loop().add_signal_handler(signal.SIGINT, disconnect)
+    await rfq.wait()
+    print("\ndisconnected")
 
 
 if __name__ == "__main__":
     if not PK or not MAKER:
         print("set RYSK_SDK_PK and RYSK_MAKER", file=sys.stderr)
         sys.exit(1)
-    signal.signal(signal.SIGINT, handle_sig)
     asyncio.run(process_rfqs())
