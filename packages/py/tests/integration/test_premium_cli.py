@@ -110,10 +110,17 @@ def run(sdk: Rysk, args: List[str]):
     return proc.returncode, stdout.strip(), stderr.strip()
 
 
-def test_cli_signs_and_posts_what_the_sdk_built(sdk):
+def one_quote_args(sdk: Rysk, tmp_path, request_id: str, q: Quote, url: str) -> List[str]:
+    """Writes a batch of one quote and returns the args that post it."""
+    batch = tmp_path / f"quote-{q.nonce}.json"
+    batch.write_text(sdk.premium_quote_batch([(request_id, q)]))
+    return sdk.premium_quote_batch_args(str(batch), url)
+
+
+def test_cli_signs_and_posts_what_the_sdk_built(sdk, tmp_path):
     api = FakeApi(json_ok(b'{"failures":[]}'))
     try:
-        code, stdout, stderr = run(sdk, sdk.premium_quote_args("req-1", quote(), api.url))
+        code, stdout, stderr = run(sdk, one_quote_args(sdk, tmp_path, "req-1", quote(), api.url))
         assert code == 0, stderr
         assert stdout == '{"failures":[]}'
 
@@ -152,10 +159,10 @@ def test_a_batch_is_one_call(sdk, tmp_path):
         api.close()
 
 
-def test_a_rejected_quote_fails_the_command(sdk):
+def test_a_rejected_quote_fails_the_command(sdk, tmp_path):
     api = FakeApi(json_ok(b'{"failures":[{"error":"request expired","quote":{}}]}'))
     try:
-        code, stdout, stderr = run(sdk, sdk.premium_quote_args("req-1", quote(), api.url))
+        code, stdout, stderr = run(sdk, one_quote_args(sdk, tmp_path, "req-1", quote(), api.url))
         assert code != 0, "the api answers 200, the exit code is the result"
         assert "request expired" in stdout, "the response still reaches stdout"
         assert "1 of 1 quotes rejected" in stderr
@@ -227,12 +234,12 @@ def test_reads_proxy_the_api_verbatim(sdk):
         api.close()
 
 
-def test_cli_refuses_a_quote_it_cannot_get_accepted(sdk):
+def test_cli_refuses_a_quote_it_cannot_get_accepted(sdk, tmp_path):
     api = FakeApi(json_ok(b'{"failures":[]}'))
     try:
         # the window is checked before signing, so nothing reaches the api
         too_far = quote(validUntil=int(time.time()) + 3600)
-        code, _, stderr = run(sdk, sdk.premium_quote_args("req-1", too_far, api.url))
+        code, _, stderr = run(sdk, one_quote_args(sdk, tmp_path, "req-1", too_far, api.url))
         assert code != 0
         assert "outside the api's window" in stderr
         assert api.seen == [], "a doomed quote must not cost a round trip"
@@ -329,7 +336,9 @@ def test_testnet_open_an_rfq_quote_cancel_requote_and_take_the_trade(tmp_path):
         n = nonce()
         ok(
             maker,
-            maker.premium_quote_args(
+            one_quote_args(
+                maker,
+                tmp_path,
                 request.id,
                 Quote(
                     assetAddress=request.asset,

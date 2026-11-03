@@ -186,51 +186,47 @@ std::vector<std::string> Rysk::quote_args(const std::string& rfq_id, const Quote
   pair(args, "--collateral", quote.collateral_asset);
   if (set(quote.premium_asset)) pair(args, "--premium_asset", *quote.premium_asset);
 
-  for (std::string& flag : domain_args(quote)) args.push_back(std::move(flag));
+  for (std::string& flag : domain_args(quote, false)) args.push_back(std::move(flag));
   if (quote.is_put) args.emplace_back("--is_put");
   if (quote.is_taker_buy) args.emplace_back("--is_taker_buy");
   return args;
 }
 
-namespace {
-
-/// The two rejections both domains share: a salt cannot be signed, and a chain
-/// that is not the quote's would be signed against the wrong domain.
-void check_shared_domain(const TypedDataDomain& domain, std::int64_t quote_chain_id,
-                         const char* what) {
-  if (set(domain.salt)) throw Error(std::string(what) + ": salt is not supported");
+/// Turns a quote's domain into the cli's domain flags, rejecting one the cli
+/// could not sign - a salt, or another chain's chainId - rather than signing
+/// against the wrong domain. The websocket quote takes the domain all or
+/// nothing; a premium quote has to name the pool's option handler, and the cli
+/// defaults its name and version.
+std::vector<std::string> Rysk::domain_args(const Quote& quote, bool premium) const {
+  if (!quote.domain && !premium) return {};
+  const TypedDataDomain empty;
+  const TypedDataDomain& domain = quote.domain ? *quote.domain : empty;
+  if (set(domain.salt)) throw Error("quote domain: salt is not supported");
   if (set(domain.chain_id)) {
     auto value = chain_id_value(*domain.chain_id);
-    if (!value || *value != quote_chain_id) {
-      throw Error(std::string(what) + ": chainId " + *domain.chain_id +
-                  " does not match the quote's chain " + std::to_string(quote_chain_id));
+    if (!value || *value != quote.chain_id) {
+      throw Error("quote domain: chainId " + *domain.chain_id +
+                  " does not match the quote's chain " + std::to_string(quote.chain_id));
     }
   }
-}
 
-}  // namespace
-
-std::vector<std::string> Rysk::domain_args(const Quote& quote) const {
-  if (!quote.domain) return {};
-  const TypedDataDomain& domain = *quote.domain;
-  check_shared_domain(domain, quote.chain_id, "quote domain");
-
-  std::vector<std::string> missing;
-  if (!set(domain.name)) missing.emplace_back("name");
-  if (!set(domain.version)) missing.emplace_back("version");
-  if (!set(domain.verifying_contract)) missing.emplace_back("verifyingContract");
+  std::string missing;
+  auto require = [&](const std::optional<std::string>& field, const char* name) {
+    if (!set(field)) missing += (missing.empty() ? "" : ", ") + std::string(name);
+  };
+  if (!premium) {
+    require(domain.name, "name");
+    require(domain.version, "version");
+  }
+  require(domain.verifying_contract, "verifyingContract");
   if (!missing.empty()) {
-    std::string joined;
-    for (std::size_t i = 0; i < missing.size(); ++i) {
-      if (i) joined += ", ";
-      joined += missing[i];
-    }
-    throw Error("quote domain: missing " + joined);
+    throw Error("quote domain: missing " + missing +
+                (premium ? ", pass the request's typeDataDomain" : ""));
   }
 
   std::vector<std::string> args;
-  pair(args, "--domain_name", *domain.name);
-  pair(args, "--domain_version", *domain.version);
+  if (set(domain.name)) pair(args, "--domain_name", *domain.name);
+  if (set(domain.version)) pair(args, "--domain_version", *domain.version);
   pair(args, "--domain_verifying_contract", *domain.verifying_contract);
   return args;
 }
@@ -275,21 +271,6 @@ std::vector<std::string> Rysk::premium_url_args(const std::optional<std::string>
   return {"--url", *url};
 }
 
-std::vector<std::string> Rysk::premium_domain_args(const Quote& quote) const {
-  if (!quote.domain || !set(quote.domain->verifying_contract)) {
-    throw Error(
-        "premium quote domain: missing verifyingContract, pass the request's typeDataDomain");
-  }
-  const TypedDataDomain& domain = *quote.domain;
-  check_shared_domain(domain, quote.chain_id, "premium quote domain");
-
-  std::vector<std::string> args;
-  if (set(domain.name)) pair(args, "--domain_name", *domain.name);
-  if (set(domain.version)) pair(args, "--domain_version", *domain.version);
-  pair(args, "--domain_verifying_contract", *domain.verifying_contract);
-  return args;
-}
-
 std::vector<std::string> Rysk::premium_requests_args(const std::string& maker,
                                                      std::optional<std::string> url) const {
   std::vector<std::string> args{"premium", "requests"};
@@ -314,30 +295,6 @@ std::vector<std::string> Rysk::premium_quote_status_args(const std::string& id,
   return args;
 }
 
-std::vector<std::string> Rysk::premium_quote_args(const std::string& request_id,
-                                                  const Quote& quote,
-                                                  std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "quote"};
-  pair(args, "--request_id", request_id);
-  pair(args, "--asset", quote.asset_address);
-  pair(args, "--chain_id", std::to_string(quote.chain_id));
-  pair(args, "--expiry", std::to_string(quote.expiry));
-  pair(args, "--strike", quote.strike);
-  pair(args, "--quantity", quote.quantity);
-  pair(args, "--usd", quote.usd);
-  pair(args, "--collateral", quote.collateral_asset);
-  pair(args, "--maker", quote.maker);
-  pair(args, "--nonce", quote.nonce);
-  pair(args, "--price", quote.price);
-  pair(args, "--valid_until", std::to_string(quote.valid_until));
-
-  for (std::string& flag : premium_domain_args(quote)) args.push_back(std::move(flag));
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  if (quote.is_put) args.emplace_back("--is_put");
-  if (quote.is_taker_buy) args.emplace_back("--is_taker_buy");
-  return args;
-}
-
 std::vector<std::string> Rysk::premium_quote_batch_args(const std::string& source,
                                                         std::optional<std::string> url) const {
   std::vector<std::string> args{"premium", "quote"};
@@ -351,7 +308,7 @@ std::string Rysk::premium_quote_batch(
   Json::Array entries;
   entries.reserve(quotes.size());
   for (const auto& [request_id, quote] : quotes) {
-    premium_domain_args(quote);  // throws before anything is written
+    domain_args(quote, true);  // throws before anything is written
     Json value = quote.to_json();
     Json::Object object = *value.as_object();
     object["requestId"] = Json(request_id);

@@ -72,6 +72,21 @@ const quote = (extra = {}) => ({
   ...extra,
 });
 
+test("open reaches a listener attached after execute", { skip: !available }, async () => {
+  const proc = sdk().execute(["version"]);
+  let opened = false;
+  proc.on("open", () => (opened = true));
+  await new Promise((resolve) => proc.on("close", resolve));
+  assert.ok(opened);
+});
+
+/** Writes quotes as a batch file and returns the args that post it. */
+const quoteBatchArgs = (rysk, url, ...entries) => {
+  const file = join(mkdtempSync(join(tmpdir(), "rysk-batch-")), "batch.json");
+  writeFileSync(file, rysk.premiumQuoteBatch(entries));
+  return rysk.premiumQuoteBatchArgs(file, url);
+};
+
 test("the cli signs and posts what the sdk built", { skip: !available }, async () => {
   const api = await fakeApi((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -79,7 +94,7 @@ test("the cli signs and posts what the sdk built", { skip: !available }, async (
   });
 
   try {
-    const result = await run(sdk(), sdk().premiumQuoteArgs("req-1", quote(), api.url));
+    const result = await run(sdk(), quoteBatchArgs(sdk(), api.url, { requestId: "req-1", quote: quote() }));
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.stdout, '{"failures":[]}');
 
@@ -133,7 +148,7 @@ test("a rejected quote fails the command", { skip: !available }, async () => {
   });
 
   try {
-    const result = await run(sdk(), sdk().premiumQuoteArgs("req-1", quote(), api.url));
+    const result = await run(sdk(), quoteBatchArgs(sdk(), api.url, { requestId: "req-1", quote: quote() }));
     assert.notEqual(result.code, 0, "the api answers 200, the exit code is the result");
     assert.match(result.stdout, /request expired/, "the response still reaches stdout");
     assert.match(result.stderr, /1 of 1 quotes rejected/);
@@ -252,7 +267,7 @@ test("the cli refuses a quote it cannot get accepted", { skip: !available }, asy
   try {
     // the window is checked before signing, so nothing reaches the api
     const tooFar = quote({ validUntil: Math.floor(Date.now() / 1000) + 3600 });
-    const result = await run(sdk(), sdk().premiumQuoteArgs("req-1", tooFar, api.url));
+    const result = await run(sdk(), quoteBatchArgs(sdk(), api.url, { requestId: "req-1", quote: tooFar }));
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /outside the api's window/);
     assert.equal(api.seen.length, 0, "a doomed quote must not cost a round trip");
@@ -338,9 +353,9 @@ test(
       const n = nonce();
       await ok(
         maker,
-        maker.premiumQuoteArgs(
-          request.id,
-          {
+        quoteBatchArgs(maker, E2E_URL, {
+          requestId: request.id,
+          quote: {
             assetAddress: request.asset,
             chainId: request.chainId,
             expiry: request.expiry,
@@ -356,8 +371,7 @@ test(
             validUntil: Math.floor(Date.now() / 1000) + 300,
             domain: request.typeDataDomain,
           },
-          E2E_URL,
-        ),
+        }),
       );
       return n;
     };

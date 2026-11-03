@@ -11,17 +11,17 @@ If the script fails to do so please navigate to https://github.com/rysk-finance/
 
 ### Process events
 
-`execute` returns a `CliWebSocket`, an `EventEmitter` with WebSocket-style handlers:
+`execute` returns a `CliWebSocket`, an `EventEmitter`. Listen with `.on(event, handler)`:
 
-| Event | Handler | Carries |
-| --- | --- | --- |
-| `open` | `onopen` | the process was spawned |
-| `message` | `onmessage` | one line of the CLI's stdout: one message |
-| `stderr` | `onstderr` | a chunk of the CLI's stderr — the CLI logs there, so this is not a failure |
-| `close` | `onclose` | the exit code; a non-zero one is how a command run on its own reports failure |
+| Event | Carries |
+| --- | --- |
+| `open` | the process was spawned; fires on the next tick, so a listener attached right after `execute` hears it |
+| `message` | one line of the CLI's stdout: one message |
+| `stderr` | a chunk of the CLI's stderr — the CLI logs there, so this is not a failure |
+| `close` | the exit code; a non-zero one is how a command run on its own reports failure |
+| `error` | the process itself failed to spawn or run |
 
 `send(args)` writes a command into a running `connect` (see below), and `close()` ends the process.
-| `error` | `onerror` | the process itself failed to spawn or run |
 
 ### Core `execute` method
 
@@ -179,7 +179,7 @@ it for a local or staging api.
 // requests this maker may quote, each with the domain to sign against
 const requests = ryskSDK.execute(ryskSDK.premiumRequestsArgs(maker));
 
-// sign and post one quote for a request
+// sign and post quotes: one or a whole strip, in one api call
 const quote: Quote = {
   ...quoteDetails,
   maker,
@@ -188,14 +188,8 @@ const quote: Quote = {
   validUntil: Math.floor(Date.now() / 1000) + 300, // SECONDS, now+2min .. now+10min
   domain: request.typeDataDomain,           // the pool's option handler
 };
-const proc = ryskSDK.execute(ryskSDK.premiumQuoteArgs(request.id, quote));
-
-// a whole strip in one api call
-writeFileSync("batch.json", ryskSDK.premiumQuoteBatch([
-  { requestId: request.id, quote: quoteA },
-  { requestId: request.id, quote: quoteB },
-]));
-ryskSDK.execute(ryskSDK.premiumQuoteBatchArgs("batch.json"));
+writeFileSync("batch.json", ryskSDK.premiumQuoteBatch([{ requestId: request.id, quote }]));
+const proc = ryskSDK.execute(ryskSDK.premiumQuoteBatchArgs("batch.json"));
 
 // your live quotes (the only source of quote ids), one quote, and a cancel
 ryskSDK.execute(ryskSDK.premiumQuotesArgs(maker));

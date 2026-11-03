@@ -211,7 +211,7 @@ missing id.
 ./ryskV12 premium requests --maker <0xmaker>
 ./ryskV12 premium quotes --maker <0xmaker>
 ./ryskV12 premium quote-status --id <quote_id>
-./ryskV12 premium quote --request_id <id> ... --domain_verifying_contract <0xoption_handler>
+./ryskV12 premium quote --batch <file|-> --private_key <pk>
 ./ryskV12 premium cancel --id <quote_id> --chain_id <chain_id> --nonce <nonce> --private_key <pk>
 ```
 
@@ -220,32 +220,26 @@ missing id.
 | `requests` | `GET /api/requests/maker?address=` — the requests this maker may quote, each with the `typeDataDomain` to sign against |
 | `quotes` | `GET /api/quotes?address=` — this maker's live quotes, and the only place quote ids come from |
 | `quote-status` | `GET /api/quotes/{id}` — one quote, whatever its status |
-| `quote` | `POST /api/quotes` — sign and post one quote, or a batch |
+| `quote` | `POST /api/quotes` — sign and post a batch of quotes in one call |
 | `cancel` | `DELETE /api/quotes/{id}` — pull a quote, authenticated with EIP712 headers |
 
 #### `premium quote`
 
-Takes the option terms as flags, exactly as the request carried them: `--request_id`, `--asset`,
-`--chain_id`, `--expiry`, `--is_put`, `--is_taker_buy`, `--strike`, `--quantity`, `--usd`,
-`--collateral`, plus your own `--maker`, `--nonce`, `--price`, `--valid_until` and `--private_key`.
+Signs and posts the quotes in `--batch <file>` (or `--batch -` for stdin): a json array, one entry per
+quote. Each entry is the option terms exactly as the request carried them, your own `maker`, `nonce`,
+`price` and `validUntil`, plus the `requestId` and the request's `typeDataDomain` as `domain`. One
+invalid entry fails the command before anything is posted.
 
 Only `requestId`, `maker`, `price`, `nonce`, `validUntil` and `signature` are sent — the api rebuilds
 the signed terms from the stored request, so a term that does not match it just yields a signature
 that will not verify.
 
 The domain is the pool's option handler, not the Rysk contract the websocket `quote` command uses:
+`domain.verifyingContract` is required; `name` defaults to `PremiumOptionHandler` and `version` to `1`.
 
-- `--domain_verifying_contract` (**required**): the request's `typeDataDomain.verifyingContract`.
-- `--domain_name`: defaults to `PremiumOptionHandler`.
-- `--domain_version`: defaults to `1`.
-
-`--valid_until` is unix **seconds** and has to sit strictly between now+2min and now+10min — the api
+`validUntil` is unix **seconds** and has to sit strictly between now+2min and now+10min — the api
 rejects anything else, and the command checks it before signing. Request `validUntil` values are
 milliseconds; passing one here is rejected as such.
-
-Batch a whole strip into one call with `--batch <file>` (or `--batch -` for stdin), a json array of
-quotes. Each entry is a quote plus `requestId` and `domain`; `--batch` cannot be combined with the
-per quote flags, and one invalid entry fails the command before anything is posted:
 
 ```json
 [

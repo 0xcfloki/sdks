@@ -135,9 +135,6 @@ class Rysk {
       const std::string& maker, std::optional<std::string> url = std::nullopt) const;
   std::vector<std::string> premium_quote_status_args(
       const std::string& id, std::optional<std::string> url = std::nullopt) const;
-  std::vector<std::string> premium_quote_args(
-      const std::string& request_id, const Quote& quote,
-      std::optional<std::string> url = std::nullopt) const;
   std::vector<std::string> premium_quote_batch_args(
       const std::string& source, std::optional<std::string> url = std::nullopt) const;
   std::vector<std::string> premium_cancel_args(
@@ -203,8 +200,7 @@ class Rysk {
   bool strict_version_;
 
   std::string url(const std::string& uri) const;
-  std::vector<std::string> domain_args(const Quote& quote) const;
-  std::vector<std::string> premium_domain_args(const Quote& quote) const;
+  std::vector<std::string> domain_args(const Quote& quote, bool premium) const;
   std::vector<std::string> premium_url_args(const std::optional<std::string>& url) const;
   void version_check() const;
   void report_version(const std::string& found) const;

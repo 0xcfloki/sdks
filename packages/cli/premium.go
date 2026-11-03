@@ -153,83 +153,15 @@ var premiumQuoteAction = &Command{
 	Flags: []Flag{
 		premiumURLFlag(),
 		&StringFlag{
-			Name:  "batch",
-			Usage: `path to a json array of quotes to sign and post in one call, or "-" for stdin. Cannot be combined with the per quote flags`,
+			Name:     "batch",
+			Required: true,
+			Usage:    `path to a json array of quotes to sign and post in one call, or "-" for stdin`,
 		},
 		&StringFlag{
-			Name:  "request_id",
-			Usage: "id of the request being quoted",
-		},
-		&StringFlag{
-			Name:  "asset",
-			Usage: "asset address, as it came on the request",
-		},
-		&IntFlag{
-			Name:  "chain_id",
-			Usage: "chain id, as it came on the request",
-		},
-		&Int64Flag{
-			Name:  "expiry",
-			Usage: "option expiry in unix seconds, as it came on the request",
-		},
-		&BoolFlag{
-			Name:  "is_put",
-			Usage: "present for a put, as it came on the request",
-		},
-		&BoolFlag{
-			Name:  "is_taker_buy",
-			Usage: "present if the taker buys, as it came on the request",
-		},
-		&StringFlag{
-			Name:  "strike",
-			Usage: "option strike (1e8), as it came on the request",
-		},
-		&StringFlag{
-			Name:  "quantity",
-			Usage: "option quantity (1e18), as it came on the request",
-		},
-		&StringFlag{
-			Name:  "usd",
-			Usage: "usd asset address, as it came on the request",
-		},
-		&StringFlag{
-			Name:  "collateral",
-			Usage: "collateral asset address, as it came on the request",
-		},
-		&StringFlag{
-			Name:  "maker",
-			Usage: "maker address, has to match the signing key",
-		},
-		&StringFlag{
-			Name:  "nonce",
-			Usage: "unused nonce for this maker (decimal uint64)",
-		},
-		&StringFlag{
-			Name:  "price",
-			Usage: "premium per unit (1e18), non zero",
-		},
-		&Int64Flag{
-			Name:  "valid_until",
-			Usage: "quote expiry in unix seconds, strictly between now+2min and now+10min",
-		},
-		&StringFlag{
-			Name:    "private_key",
-			Usage:   "private key to sign the quote with",
-			EnvVars: []string{"RYSK_PRIVATE_KEY"},
-		},
-		&StringFlag{
-			Name:  "domain_name",
-			Value: PREMIUM_DOMAIN_NAME,
-			Usage: "EIP712 domain name",
-		},
-		&StringFlag{
-			Name:  "domain_version",
-			Value: PREMIUM_DOMAIN_VERSION,
-			Usage: "EIP712 domain version",
-		},
-		&StringFlag{
-			Name:  "domain_verifying_contract",
-			Usage: "EIP712 domain verifying contract: the pool's option handler, from the request's typeDataDomain",
+			Name:     "private_key",
+			Required: true,
+			Usage:    "private key to sign the quotes with",
+			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 	},
 	Action: func(c *Context) error {
@@ -399,10 +331,6 @@ func premiumAuthTypedData(chainId int64, nonce string) *apitypes.TypedData {
 
 func premiumQuote(c *Context) error {
 	privateKey := c.String("private_key")
-	if privateKey == "" {
-		return errors.New("missing private key")
-	}
-
 	inputs, err := premiumQuoteInputs(c)
 	if err != nil {
 		return err
@@ -439,48 +367,9 @@ func premiumQuote(c *Context) error {
 	return premiumQuoteResult(res, len(payloads))
 }
 
-// premiumQuoteInputs collects the quotes to sign, either from a batch file or
-// from the per quote flags.
+// premiumQuoteInputs reads the quotes to sign from the batch.
 func premiumQuoteInputs(c *Context) ([]premiumQuoteInput, error) {
-	batch := c.String("batch")
-	if batch == "" {
-		return []premiumQuoteInput{{
-			Quote: Quote{
-				AssetAddress:    c.String("asset"),
-				ChainID:         c.Int("chain_id"),
-				Expiry:          c.Int64("expiry"),
-				IsPut:           c.Bool("is_put"),
-				IsTakerBuy:      c.Bool("is_taker_buy"),
-				Maker:           c.String("maker"),
-				Nonce:           c.String("nonce"),
-				Price:           c.String("price"),
-				Quantity:        c.String("quantity"),
-				Strike:          c.String("strike"),
-				ValidUntil:      c.Int64("valid_until"),
-				USD:             c.String("usd"),
-				CollateralAsset: c.String("collateral"),
-			},
-			RequestID: c.String("request_id"),
-			Domain: &premiumDomainInput{
-				Name:              c.String("domain_name"),
-				Version:           c.String("domain_version"),
-				VerifyingContract: c.String("domain_verifying_contract"),
-			},
-		}}, nil
-	}
-
-	perQuoteFlags := []string{
-		"request_id", "asset", "chain_id", "expiry", "is_put", "is_taker_buy",
-		"strike", "quantity", "usd", "collateral", "maker", "nonce", "price",
-		"valid_until", "domain_name", "domain_version", "domain_verifying_contract",
-	}
-	for _, flag := range perQuoteFlags {
-		if c.IsSet(flag) {
-			return nil, fmt.Errorf("--batch cannot be combined with --%s", flag)
-		}
-	}
-
-	data, err := premiumReadBatch(batch)
+	data, err := premiumReadBatch(c.String("batch"))
 	if err != nil {
 		return nil, err
 	}

@@ -112,15 +112,10 @@ func (a *Account) newTransactionOpts(ctx context.Context, chainID int, c ethclie
 func (a *Account) approve(ctx context.Context, chainID int, client ethclient.Client, amount *big.Int, asset common.Address, spender common.Address) (txHash string, err error) {
 	opts, err := a.newTransactionOpts(ctx, chainID, client)
 	if err != nil {
-		return "", nil
-	}
-
-	erc20, err := NewIERC20(asset, &client)
-	if err != nil {
 		return "", err
 	}
 
-	tx, err := erc20.Approve(opts, spender, amount)
+	tx, err := erc20(asset, &client).Transact(opts, "approve", spender, amount)
 	if err != nil {
 		return "", err
 	}

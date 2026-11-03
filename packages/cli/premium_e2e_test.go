@@ -360,12 +360,8 @@ func e2eApprove(t *testing.T, rpcURL string, makerKey string, chainID int, asset
 	if err != nil {
 		t.Fatalf("maker key: %v", err)
 	}
-	token, err := NewIERC20(common.HexToAddress(asset), client)
-	if err != nil {
-		t.Fatalf("bind %s: %v", asset, err)
-	}
-
-	allowance, err := token.Allowance(&bind.CallOpts{Context: ctx}, account.Public, common.HexToAddress(spender))
+	token := erc20(common.HexToAddress(asset), client)
+	allowance, err := erc20Allowance(&bind.CallOpts{Context: ctx}, token, account.Public, common.HexToAddress(spender))
 	if err != nil {
 		t.Fatalf("allowance: %v", err)
 	}
@@ -376,7 +372,7 @@ func e2eApprove(t *testing.T, rpcURL string, makerKey string, chainID int, asset
 	if err != nil {
 		t.Fatalf("transaction opts: %v", err)
 	}
-	tx, err := token.Approve(opts, common.HexToAddress(spender), amount)
+	tx, err := token.Transact(opts, "approve", common.HexToAddress(spender), amount)
 	if err != nil {
 		t.Fatalf("approve %s to %s: %v", asset, spender, err)
 	}

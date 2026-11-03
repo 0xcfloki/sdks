@@ -82,7 +82,6 @@ test("no arg builder carries the private key", () => {
     rysk.premiumRequestsArgs(MAKER),
     rysk.premiumQuotesArgs(MAKER),
     rysk.premiumQuoteStatusArgs("id"),
-    rysk.premiumQuoteArgs("rfq", quote({ domain: { verifyingContract: HANDLER } })),
     rysk.premiumQuoteBatchArgs("batch.json"),
     rysk.premiumCancelArgs("id", 84532, "43"),
     rysk.premiumRequestArgs("requests.json", 84532, "44"),
@@ -124,10 +123,8 @@ test("send writes one json args line into the process's stdin", async () => {
 
 test("no arg builder emits an empty arg", () => {
   const rysk = sdk();
-  const off = quote({ isPut: false, isTakerBuy: false, domain: { verifyingContract: HANDLER } });
   for (const args of [
     rysk.quoteArgs("rfq", quote({ isPut: false, isTakerBuy: false })),
-    rysk.premiumQuoteArgs("req", off),
     rysk.transferArgs({ user: MAKER, amount: "1", asset: ASSET, chain_id: 84532, is_deposit: false, nonce: "1" }),
   ]) {
     assert.ok(!args.includes(""), `${args[0]} carries "", which the cli rejects`);
@@ -155,18 +152,6 @@ test("quote sends the premium asset only when it is set", () => {
   assert.ok(!sdk().quoteArgs("rfq", quote()).includes("--premium_asset"));
 });
 
-test("premium quote carries the domain and the request id", () => {
-  const args = sdk().premiumQuoteArgs("req-1", quote({
-    domain: { name: "PremiumOptionHandler", version: "1", verifyingContract: HANDLER },
-  }));
-
-  assert.deepEqual(args.slice(0, 2), ["premium", "quote"]);
-  assert.equal(flagValue(args, "--request_id"), "req-1");
-  assert.equal(flagValue(args, "--domain_name"), "PremiumOptionHandler");
-  assert.equal(flagValue(args, "--domain_version"), "1");
-  assert.equal(flagValue(args, "--domain_verifying_contract"), HANDLER);
-});
-
 test("premium url is only passed when given", () => {
   const rysk = sdk();
   assert.ok(!rysk.premiumRequestsArgs(MAKER).includes("--url"));
@@ -178,42 +163,26 @@ test("premium url is only passed when given", () => {
 
 test("a domain the cli cannot sign is rejected before spawning", () => {
   const rysk = sdk();
+  const batch = (domain) => rysk.premiumQuoteBatch([{ requestId: "req", quote: quote({ domain }) }]);
 
+  assert.throws(() => batch(undefined), /missing verifyingContract/);
+  assert.throws(() => batch({ verifyingContract: HANDLER, salt: "0x01" }), /salt is not supported/);
   assert.throws(
-    () => rysk.premiumQuoteArgs("req", quote()),
-    /missing verifyingContract/,
-  );
-  assert.throws(
-    () => rysk.premiumQuoteArgs("req", quote({ domain: { verifyingContract: HANDLER, salt: "0x01" } })),
-    /salt is not supported/,
-  );
-  assert.throws(
-    () =>
-      rysk.premiumQuoteArgs(
-        "req",
-        quote({ domain: { verifyingContract: HANDLER, chainId: 8453 } }),
-      ),
+    () => batch({ verifyingContract: HANDLER, chainId: 8453 }),
     /does not match the quote's chain 84532/,
   );
   // a hex chain id that does match is fine
-  assert.ok(
-    rysk.premiumQuoteArgs(
-      "req",
-      quote({ domain: { verifyingContract: HANDLER, chainId: "0x14a34" } }),
-    ),
-  );
+  assert.ok(batch({ verifyingContract: HANDLER, chainId: "0x14a34" }));
 });
 
-test("websocket quote rejects a partial domain, premium defaults its name", () => {
+test("websocket quote takes the domain all or nothing", () => {
   const rysk = sdk();
   assert.throws(
     () => rysk.quoteArgs("rfq", quote({ domain: { name: "rysk" } })),
     /missing version, verifyingContract/,
   );
-
-  const premium = rysk.premiumQuoteArgs("req", quote({ domain: { verifyingContract: HANDLER } }));
-  assert.ok(!premium.includes("--domain_name"));
-  assert.equal(flagValue(premium, "--domain_verifying_contract"), HANDLER);
+  const args = rysk.quoteArgs("rfq", quote({ domain: { name: "rysk", version: "0.0.0", verifyingContract: HANDLER } }));
+  assert.equal(flagValue(args, "--domain_verifying_contract"), HANDLER);
 });
 
 test("premiumQuoteBatch serialises entries the cli can read", () => {

@@ -86,6 +86,18 @@ static Quote quote() {
   return q;
 }
 
+/// Writes a batch of the one quote to `path` and returns the args that post it.
+static std::vector<std::string> post_one(const Rysk& rysk, const std::string& path,
+                                         const std::string& request_id, const Quote& q,
+                                         const std::string& url) {
+  std::ofstream(path) << rysk.premium_quote_batch({{request_id, q}});
+  return rysk.premium_quote_batch_args(path, url);
+}
+
+static std::string scratch_path(const char* name) {
+  return "/tmp/rysk-cpp-" + std::string(name) + "-" + std::to_string(::getpid()) + ".json";
+}
+
 struct Call {
   std::string method;
   std::string path;
@@ -228,7 +240,9 @@ TEST(the_cli_signs_and_posts_what_the_sdk_built) {
   FakeApi api(FakeApi::json_ok(R"({"failures":[]})"));
   Rysk rysk = sdk();
 
-  Output out = rysk.run(rysk.premium_quote_args("req-1", quote(), api.url()));
+  std::string path = scratch_path("quote");
+  Output out = rysk.run(post_one(rysk, path, "req-1", quote(), api.url()));
+  ::unlink(path.c_str());
   CHECK_MSG(out.exit_code == 0, out.err);
   CHECK_EQ(trimmed(out.out), std::string(R"({"failures":[]})"));
 
@@ -274,7 +288,7 @@ TEST(a_batch_is_one_call) {
     entries.emplace_back("req-" + std::to_string(i), q);
   }
 
-  std::string path = "/tmp/rysk-cpp-batch-" + std::to_string(::getpid()) + ".json";
+  std::string path = scratch_path("batch");
   {
     std::ofstream file(path);
     file << rysk.premium_quote_batch(entries);
@@ -298,7 +312,9 @@ TEST(a_rejected_quote_fails_the_command) {
   FakeApi api(FakeApi::json_ok(R"({"failures":[{"error":"request expired","quote":{}}]})"));
   Rysk rysk = sdk();
 
-  Output out = rysk.run(rysk.premium_quote_args("req-1", quote(), api.url()));
+  std::string path = scratch_path("rejected");
+  Output out = rysk.run(post_one(rysk, path, "req-1", quote(), api.url()));
+  ::unlink(path.c_str());
   CHECK_MSG(out.exit_code != 0, "the api answers 200, the exit code is the result");
   CHECK_MSG(out.out.find("request expired") != std::string::npos, out.out);
   CHECK_MSG(out.err.find("1 of 1 quotes rejected") != std::string::npos, out.err);
@@ -500,7 +516,7 @@ TEST(testnet_open_an_rfq_quote_cancel_requote_and_take_the_trade) {
     q.price = "1";
     q.valid_until = millis() / 1000 + 300;
     q.domain = request->type_data_domain;
-    ok(maker_sdk, maker_sdk.premium_quote_args(request_id, q, url));
+    ok(maker_sdk, post_one(maker_sdk, std::string(dir) + "/quote.json", request_id, q, url));
     return q.nonce;
   };
   // the id of the maker's live quote with this nonce, or "" when there is none

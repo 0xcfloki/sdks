@@ -5,23 +5,15 @@ import Stream from "stream";
 
 import { HexString, Quote, Transfer } from "./models";
 
-enum ReadyState {
-  CONNECTING = 0,
-  OPEN = 1,
-  CLOSING = 2,
-  CLOSED = 3,
-}
 class CliWebSocket extends EventEmitter {
   private _childProcess: ChildProcess | null = null;
-  public readyState: ReadyState = ReadyState.CONNECTING;
+  private _closed = false;
   public stdout: Stream.Readable | null;
   public stderr: Stream.Readable | null;
 
-  // Constructor is private to enforce static factory method for clarity
   constructor(childProcess: ChildProcess) {
     super();
     this._childProcess = childProcess;
-    this.readyState = ReadyState.OPEN; // The process is spawned, so it's "open" from this perspective
     this.stdout = this._childProcess.stdout;
     this.stderr = this._childProcess.stderr;
 
@@ -42,67 +34,30 @@ class CliWebSocket extends EventEmitter {
 
     // Handle process close
     this._childProcess.on("close", (code: number, _: string) => {
-      this.readyState = ReadyState.CLOSED;
+      this._closed = true;
       this.emit("close", code, "Process exited"); // Mimicking close event with code and reason
     });
 
     // Handle process error (e.g., spawn failure)
     this._childProcess.on("error", (err: Error) => {
-      this.readyState = ReadyState.CLOSED;
+      this._closed = true;
       this.emit("error", err.toString());
       this.emit("close");
     });
 
-    this.emit("open");
+    // deferred, so a listener attached right after execute() still hears it
+    process.nextTick(() => this.emit("open"));
   }
 
-  /**
-   * Closes the CLI process.
-   * @param _code Optional close code.
-   * @param reason Optional reason for closing.
-   */
-  public close(_code?: number, _reason?: string): void {
-    if (
-      this.readyState === ReadyState.CLOSING ||
-      this.readyState === ReadyState.CLOSED
-    ) {
-      return;
+  /** Kills the CLI process, which disconnects a connect. */
+  public close(): void {
+    if (!this._closed) {
+      this._childProcess?.kill("SIGTERM");
     }
-    this.readyState = ReadyState.CLOSING;
-    this._childProcess?.kill("SIGTERM"); // Send termination signal
-    // The 'close' event listener will handle the state change to CLOSED
   }
 
-  /**
-   * Sends a command into a running `connect`: `args` as the CLI would take
-   * them, e.g. `sdk.quoteArgs(...)`. The connection signs and sends it itself,
-   * so no process is spawned per command.
-   */
   public send(args: Array<string>): void {
     this._childProcess?.stdin?.write(JSON.stringify(args) + "\n");
-  }
-
-  // Mimic WebSocket event handlers for convenience, though EventEmitter is primary
-  public onopen?: () => void;
-  public onmessage?: (msg: Buffer) => void;
-  public onclose?: () => void;
-  public onerror?: (event: Buffer) => void;
-  public onstderr?: (msg: Buffer) => void;
-
-  // Override emit to trigger on* handlers
-  public emit(eventName: string | symbol, ...args: any[]): boolean {
-    if (eventName === "open" && this.onopen) {
-      this.onopen();
-    } else if (eventName === "message" && this.onmessage) {
-      this.onmessage(args[0]);
-    } else if (eventName === "close" && this.onclose) {
-      this.onclose();
-    } else if (eventName === "error" && this.onerror) {
-      this.onerror(args[0]);
-    } else if (eventName === "stderr" && this.onstderr) {
-      this.onstderr(args[0]);
-    }
-    return super.emit(eventName, ...args);
   }
 }
 
@@ -337,43 +292,43 @@ class Rysk {
   }
 
   /**
-   * Turns a request's domain into the CLI's domain flags. The CLI takes the
-   * domain's chainId from the quote, so a domain for another chain, or one using
-   * a salt, cannot be signed and is rejected here rather than silently signed
-   * against the wrong domain.
+   * Turns a quote's domain into the CLI's domain flags, rejecting one the CLI
+   * could not sign - a salt, or another chain's chainId - rather than signing
+   * against the wrong domain. The websocket quote takes the domain all or
+   * nothing; a premium quote has to name the pool's option handler, and the CLI
+   * defaults its name and version.
    */
-  private _domainArgs(quote: Quote): Array<string> {
+  private _domainArgs(quote: Quote, premium = false): Array<string> {
     const domain = quote.domain;
-    if (!domain) {
+    if (!domain && !premium) {
       return [];
     }
-
-    if (domain.salt) {
+    if (domain?.salt) {
       throw new Error("quote domain: salt is not supported");
     }
-    if (domain.chainId !== undefined && domain.chainId !== null) {
-      const domainChainId = Number(domain.chainId);
-      if (domainChainId !== quote.chainId) {
+    if (domain?.chainId !== undefined && domain?.chainId !== null) {
+      if (Number(domain!.chainId) !== quote.chainId) {
         throw new Error(
-          `quote domain: chainId ${domain.chainId} does not match the quote's chain ${quote.chainId}`,
+          `quote domain: chainId ${domain!.chainId} does not match the quote's chain ${quote.chainId}`,
         );
       }
     }
 
-    const missing = (["name", "version", "verifyingContract"] as const).filter(
-      (field) => !domain[field],
-    );
+    const required = premium
+      ? (["verifyingContract"] as const)
+      : (["name", "version", "verifyingContract"] as const);
+    const missing = required.filter((field) => !domain?.[field]);
     if (missing.length) {
-      throw new Error(`quote domain: missing ${missing.join(", ")}`);
+      throw new Error(
+        `quote domain: missing ${missing.join(", ")}${premium ? ", pass the request's typeDataDomain" : ""}`,
+      );
     }
 
     return [
-      "--domain_name",
-      domain.name!,
-      "--domain_version",
-      domain.version!,
+      ...(domain!.name ? ["--domain_name", domain!.name] : []),
+      ...(domain!.version ? ["--domain_version", domain!.version] : []),
       "--domain_verifying_contract",
-      domain.verifyingContract!,
+      domain!.verifyingContract!,
     ];
   }
 
@@ -383,38 +338,6 @@ class Rysk {
    */
   private _premiumURLArgs(url?: string): Array<string> {
     return url ? ["--url", url] : [];
-  }
-
-  /**
-   * The premium api signs against the pool's option handler, which arrives on
-   * the request as `typeDataDomain`. Only the verifying contract is required -
-   * the CLI defaults the name and version - but a domain it cannot sign is
-   * rejected here rather than passed on.
-   */
-  private _premiumDomainArgs(quote: Quote): Array<string> {
-    const domain = quote.domain;
-    if (!domain?.verifyingContract) {
-      throw new Error(
-        "premium quote domain: missing verifyingContract, pass the request's typeDataDomain",
-      );
-    }
-    if (domain.salt) {
-      throw new Error("premium quote domain: salt is not supported");
-    }
-    if (domain.chainId !== undefined && domain.chainId !== null) {
-      if (Number(domain.chainId) !== quote.chainId) {
-        throw new Error(
-          `premium quote domain: chainId ${domain.chainId} does not match the quote's chain ${quote.chainId}`,
-        );
-      }
-    }
-
-    return [
-      ...(domain.name ? ["--domain_name", domain.name] : []),
-      ...(domain.version ? ["--domain_version", domain.version] : []),
-      "--domain_verifying_contract",
-      domain.verifyingContract,
-    ];
   }
 
   /** Requests this maker may quote, each carrying the domain to sign against. */
@@ -451,46 +374,6 @@ class Rysk {
   }
 
   /**
-   * Signs and posts one quote. The terms have to be the request's - the api
-   * rebuilds the signed message from the stored request - and `validUntil` is in
-   * seconds, strictly between now+2min and now+10min.
-   */
-  public premiumQuoteArgs(requestId: string, quote: Quote, url?: string) {
-    return [
-      "premium",
-      "quote",
-      "--request_id",
-      requestId,
-      "--asset",
-      quote.assetAddress,
-      "--chain_id",
-      quote.chainId.toString(),
-      "--expiry",
-      quote.expiry.toString(),
-      "--strike",
-      quote.strike,
-      "--quantity",
-      quote.quantity,
-      "--usd",
-      quote.usd,
-      "--collateral",
-      quote.collateralAsset,
-      "--maker",
-      quote.maker,
-      "--nonce",
-      quote.nonce,
-      "--price",
-      quote.price,
-      "--valid_until",
-      quote.validUntil.toString(),
-      ...this._premiumDomainArgs(quote),
-      ...this._premiumURLArgs(url),
-      ...(quote.isPut ? ["--is_put"] : []),
-      ...(quote.isTakerBuy ? ["--is_taker_buy"] : []),
-    ];
-  }
-
-  /**
    * Posts a batch of quotes in one call, reading them from `source` - a file
    * path, or "-" for stdin. Build the file with `premiumQuoteBatch`.
    */
@@ -511,7 +394,7 @@ class Rysk {
   public premiumQuoteBatch(quotes: Array<{ requestId: string; quote: Quote }>) {
     return JSON.stringify(
       quotes.map(({ requestId, quote }) => {
-        this._premiumDomainArgs(quote);
+        this._domainArgs(quote, true);
         return { ...quote, requestId };
       }),
     );

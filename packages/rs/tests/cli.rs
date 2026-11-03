@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -184,6 +185,18 @@ fn run(sdk: &Rysk, args: &[String]) -> (i32, String, String) {
     )
 }
 
+/// Writes quotes as a batch file and returns the args that post it.
+fn quote_batch_args(sdk: &Rysk, url: Option<&str>, entries: &[(String, Quote)]) -> Vec<String> {
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "rysk-rs-batch-{}-{}.json",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(&path, sdk.premium_quote_batch(entries).unwrap()).unwrap();
+    sdk.premium_quote_batch_args(path.to_str().unwrap(), url)
+}
+
 #[test]
 fn the_cli_reports_a_version_the_sdk_accepts() {
     let sdk = sdk_or_skip!();
@@ -197,9 +210,7 @@ fn the_cli_signs_and_posts_what_the_sdk_built() {
     let sdk = sdk_or_skip!();
     let api = FakeApi::json_ok(r#"{"failures":[]}"#);
 
-    let args = sdk
-        .premium_quote_args("req-1", &quote(), Some(&api.url))
-        .unwrap();
+    let args = quote_batch_args(&sdk, Some(&api.url), &[("req-1".into(), quote())]);
     let (code, stdout, stderr) = run(&sdk, &args);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, r#"{"failures":[]}"#);
@@ -255,12 +266,7 @@ fn a_batch_is_one_call() {
         })
         .collect();
 
-    let dir = std::env::temp_dir().join(format!("rysk-rs-batch-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("batch.json");
-    std::fs::write(&path, sdk.premium_quote_batch(&entries).unwrap()).unwrap();
-
-    let args = sdk.premium_quote_batch_args(path.to_str().unwrap(), Some(&api.url));
+    let args = quote_batch_args(&sdk, Some(&api.url), &entries);
     let (code, _, stderr) = run(&sdk, &args);
     assert_eq!(code, 0, "{stderr}");
 
@@ -268,8 +274,6 @@ fn a_batch_is_one_call() {
     assert_eq!(calls.len(), 1, "a batch has to be one request");
     let posted: serde_json::Value = serde_json::from_str(&calls[0].body).unwrap();
     assert_eq!(posted.as_array().unwrap().len(), 5);
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -277,9 +281,7 @@ fn a_rejected_quote_fails_the_command() {
     let sdk = sdk_or_skip!();
     let api = FakeApi::json_ok(r#"{"failures":[{"error":"request expired","quote":{}}]}"#);
 
-    let args = sdk
-        .premium_quote_args("req-1", &quote(), Some(&api.url))
-        .unwrap();
+    let args = quote_batch_args(&sdk, Some(&api.url), &[("req-1".into(), quote())]);
     let (code, stdout, stderr) = run(&sdk, &args);
 
     assert_ne!(code, 0, "the api answers 200, the exit code is the result");
@@ -484,8 +486,7 @@ fn testnet_open_an_rfq_quote_cancel_requote_and_take_the_trade() {
         };
         ok(
             &mk,
-            mk.premium_quote_args(&request_id, &quote, url)
-                .expect("the request's domain is signable"),
+            quote_batch_args(&mk, url, &[(request_id.clone(), quote)]),
         );
         n
     };

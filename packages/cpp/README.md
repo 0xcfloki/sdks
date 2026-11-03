@@ -61,7 +61,9 @@ quote.usd           = request.usd;
 quote.collateral_asset = request.collateral_asset;
 quote.domain        = request.type_data_domain;
 
-Output result = sdk.run(sdk.premium_quote_args(request_id, quote));
+// one quote or a whole strip, in one api call
+std::ofstream("batch.json") << sdk.premium_quote_batch({{request_id, quote}});
+Output result = sdk.run(sdk.premium_quote_batch_args("batch.json"));
 if (result.exit_code != 0) std::cerr << result.err << "\n";
 ```
 

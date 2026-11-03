@@ -207,48 +207,6 @@ fn websocket_quote_without_a_domain_sends_no_domain_flags() {
 // -------------------------------------------------------------- premium quote
 
 #[test]
-fn premium_quote_carries_domain_and_request_id() {
-    let args = sdk()
-        .premium_quote_args(
-            "req-1",
-            &Quote {
-                domain: Some(TypedDataDomain {
-                    name: Some("PremiumOptionHandler".into()),
-                    version: Some("1".into()),
-                    verifying_contract: Some(HANDLER.into()),
-                    ..Default::default()
-                }),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap();
-
-    assert_eq!(&args[..2], ["premium", "quote"]);
-    assert_eq!(flag_value(&args, "--request_id"), "req-1");
-    assert_eq!(flag_value(&args, "--domain_name"), "PremiumOptionHandler");
-    assert_eq!(flag_value(&args, "--domain_version"), "1");
-    assert_eq!(flag_value(&args, "--domain_verifying_contract"), HANDLER);
-}
-
-#[test]
-fn premium_defaults_the_domain_name() {
-    let args = sdk()
-        .premium_quote_args(
-            "req",
-            &Quote {
-                domain: Some(premium_domain()),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap();
-    assert!(!has(&args, "--domain_name"));
-    assert!(!has(&args, "--domain_version"));
-    assert_eq!(flag_value(&args, "--domain_verifying_contract"), HANDLER);
-}
-
-#[test]
 fn premium_url_only_passed_when_given() {
     let sdk = sdk();
     assert!(!has(&sdk.premium_requests_args(MAKER, None), "--url"));
@@ -329,93 +287,52 @@ fn premium_taker_builders_spell_the_cli_flags() {
     );
 }
 
-#[test]
-fn premium_rejects_a_domain_with_no_verifying_contract() {
-    let err = sdk().premium_quote_args("req", &quote(), None).unwrap_err();
-    assert!(
-        err.to_string().contains("missing verifyingContract"),
-        "got {err}"
-    );
+/// Serialises one quote with this domain as a batch, the only way a premium
+/// quote's domain is checked.
+fn batch(domain: Option<TypedDataDomain>) -> Result<String, ryskv12::Error> {
+    sdk().premium_quote_batch(&[("req".to_string(), Quote { domain, ..quote() })])
 }
 
 #[test]
-fn premium_rejects_a_salted_domain() {
-    let err = sdk()
-        .premium_quote_args(
-            "req",
-            &Quote {
-                domain: Some(TypedDataDomain {
-                    salt: Some("0x01".into()),
-                    ..premium_domain()
-                }),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap_err();
-    assert!(
-        err.to_string().contains("salt is not supported"),
-        "got {err}"
-    );
-}
+fn premium_rejects_a_domain_the_cli_cannot_sign() {
+    let err = |domain| batch(domain).unwrap_err().to_string();
 
-#[test]
-fn premium_rejects_a_domain_for_another_chain() {
-    let err = sdk()
-        .premium_quote_args(
-            "req",
-            &Quote {
-                domain: Some(TypedDataDomain {
-                    chain_id: Some(ryskv12::ChainId::Number(8453)),
-                    ..premium_domain()
-                }),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap_err();
+    let missing = err(None);
     assert!(
-        err.to_string()
-            .contains("does not match the quote's chain 84532"),
-        "got {err}"
+        missing.contains("missing verifyingContract, pass the request's typeDataDomain"),
+        "got {missing}"
+    );
+    let salted = err(Some(TypedDataDomain {
+        salt: Some("0x01".into()),
+        ..premium_domain()
+    }));
+    assert!(salted.contains("salt is not supported"), "got {salted}");
+    let other_chain = err(Some(TypedDataDomain {
+        chain_id: Some(ryskv12::ChainId::Number(8453)),
+        ..premium_domain()
+    }));
+    assert!(
+        other_chain.contains("does not match the quote's chain 84532"),
+        "got {other_chain}"
+    );
+    let not_a_number = err(Some(TypedDataDomain {
+        chain_id: Some(ryskv12::ChainId::Text("mainnet".into())),
+        ..premium_domain()
+    }));
+    assert!(
+        not_a_number.contains("does not match"),
+        "got {not_a_number}"
     );
 }
 
 #[test]
 fn premium_accepts_a_matching_hex_chain_id() {
     // the server marshals chain ids as hex strings, so 0x14a34 is 84532
-    let args = sdk()
-        .premium_quote_args(
-            "req",
-            &Quote {
-                domain: Some(TypedDataDomain {
-                    chain_id: Some(ryskv12::ChainId::Text("0x14a34".into())),
-                    ..premium_domain()
-                }),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap();
-    assert_eq!(flag_value(&args, "--domain_verifying_contract"), HANDLER);
-}
-
-#[test]
-fn premium_rejects_a_chain_id_that_is_not_a_number() {
-    let err = sdk()
-        .premium_quote_args(
-            "req",
-            &Quote {
-                domain: Some(TypedDataDomain {
-                    chain_id: Some(ryskv12::ChainId::Text("mainnet".into())),
-                    ..premium_domain()
-                }),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap_err();
-    assert!(err.to_string().contains("does not match"), "got {err}");
+    batch(Some(TypedDataDomain {
+        chain_id: Some(ryskv12::ChainId::Text("0x14a34".into())),
+        ..premium_domain()
+    }))
+    .unwrap();
 }
 
 // --------------------------------------------------------------------- batch
@@ -499,7 +416,6 @@ fn no_arg_builder_carries_the_private_key() {
         sdk.premium_requests_args(MAKER, None),
         sdk.premium_quotes_args(MAKER, None),
         sdk.premium_quote_status_args("id", None),
-        sdk.premium_quote_args("rfq", &with_domain, None).unwrap(),
         sdk.premium_quote_batch_args("batch.json", None),
         sdk.premium_cancel_args("id", 84532, "43", None),
         sdk.premium_request_args("r.json", 84532, "1", None),

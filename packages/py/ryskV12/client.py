@@ -85,7 +85,7 @@ class Rysk:
 
         downloaded = "ryskV12"
         if not path.exists(downloaded):
-            # the script reports missing dependencies on stdout and still exits 0
+            # the script exits non zero on a failure, but check the file all the same
             raise RuntimeError(
                 f"the download script left no {downloaded}: {(result.stdout or result.stderr).strip()}"
             )
@@ -279,31 +279,6 @@ class Rysk:
         staging api."""
         return ["--url", url] if url else []
 
-    def _premium_domain_args(self, quote: Quote) -> List[str]:
-        """The premium api signs against the pool's option handler, which arrives
-        on the request as typeDataDomain. Only the verifying contract is required
-        - the CLI defaults the name and version - but a domain it cannot sign is
-        rejected here rather than passed on."""
-        domain = quote.domain
-        if domain is None or not domain.verifyingContract:
-            raise ValueError(
-                "premium quote domain: missing verifyingContract, pass the request's typeDataDomain"
-            )
-        if domain.salt:
-            raise ValueError("premium quote domain: salt is not supported")
-        if domain.chainId is not None and int(str(domain.chainId), 0) != quote.chainId:
-            raise ValueError(
-                f"premium quote domain: chainId {domain.chainId} does not match the quote's chain {quote.chainId}"
-            )
-
-        args: List[str] = []
-        if domain.name:
-            args.extend(["--domain_name", domain.name])
-        if domain.version:
-            args.extend(["--domain_version", domain.version])
-        args.extend(["--domain_verifying_contract", domain.verifyingContract])
-        return args
-
     def premium_requests_args(self, maker: str, url: Optional[str] = None):
         """Requests this maker may quote, each carrying the domain to sign against."""
         return ["premium", "requests", "--maker", maker, *self._premium_url_args(url)]
@@ -315,46 +290,6 @@ class Rysk:
     def premium_quote_status_args(self, id: str, url: Optional[str] = None):
         """One quote by id, whatever its status."""
         return ["premium", "quote-status", "--id", id, *self._premium_url_args(url)]
-
-    def premium_quote_args(self, request_id: str, quote: Quote, url: Optional[str] = None):
-        """Signs and posts one quote. The terms have to be the request's - the api
-        rebuilds the signed message from the stored request - and validUntil is in
-        seconds, strictly between now+2min and now+10min."""
-        base = [
-            "premium",
-            "quote",
-            "--request_id",
-            request_id,
-            "--asset",
-            quote.assetAddress,
-            "--chain_id",
-            str(quote.chainId),
-            "--expiry",
-            str(quote.expiry),
-            "--strike",
-            quote.strike,
-            "--quantity",
-            quote.quantity,
-            "--usd",
-            quote.usd,
-            "--collateral",
-            quote.collateralAsset,
-            "--maker",
-            quote.maker,
-            "--nonce",
-            quote.nonce,
-            "--price",
-            quote.price,
-            "--valid_until",
-            str(quote.validUntil),
-            *self._premium_domain_args(quote),
-            *self._premium_url_args(url),
-        ]
-        if quote.isPut:
-            base.append("--is_put")
-        if quote.isTakerBuy:
-            base.append("--is_taker_buy")
-        return base
 
     def premium_quote_batch_args(self, source: str, url: Optional[str] = None):
         """Posts a batch of quotes in one call, reading them from source - a file
@@ -373,7 +308,7 @@ class Rysk:
         before anything is written."""
         entries = []
         for request_id, quote in quotes:
-            self._premium_domain_args(quote)
+            self._domain_args(quote, True)
             entry = asdict(quote)
             entry["requestId"] = request_id
             entries.append({k: v for k, v in entry.items() if v is not None})
@@ -491,36 +426,33 @@ class Rysk:
             base.append("--is_taker_buy")
         return base
 
-    def _domain_args(self, quote: Quote) -> List[str]:
-        """Turns a request's domain into the CLI's domain flags. The CLI takes
-        the domain's chainId from the quote, so a domain for another chain, or
-        one using a salt, cannot be signed and is rejected here rather than
-        silently signed against the wrong domain."""
+    def _domain_args(self, quote: Quote, premium: bool = False) -> List[str]:
+        """Turns a quote's domain into the CLI's domain flags, rejecting one the
+        CLI could not sign - a salt, or another chain's chainId - rather than
+        signing against the wrong domain. The websocket quote takes the domain
+        all or nothing; a premium quote has to name the pool's option handler,
+        and the CLI defaults its name and version."""
         domain = quote.domain
-        if domain is None:
+        if domain is None and not premium:
             return []
-
-        if domain.salt:
+        if domain is not None and domain.salt:
             raise ValueError("quote domain: salt is not supported")
-        if domain.chainId is not None and int(str(domain.chainId), 0) != quote.chainId:
+        if domain is not None and domain.chainId is not None and int(str(domain.chainId), 0) != quote.chainId:
             raise ValueError(
                 f"quote domain: chainId {domain.chainId} does not match the quote's chain {quote.chainId}"
             )
 
-        missing = [
-            field
-            for field in ("name", "version", "verifyingContract")
-            if not getattr(domain, field)
-        ]
+        required = ("verifyingContract",) if premium else ("name", "version", "verifyingContract")
+        missing = [field for field in required if not getattr(domain, field, None)]
         if missing:
-            raise ValueError(f"quote domain: missing {', '.join(missing)}")
+            hint = ", pass the request's typeDataDomain" if premium else ""
+            raise ValueError(f"quote domain: missing {', '.join(missing)}{hint}")
 
-        return [
-            "--domain_name",
-            domain.name,
-            "--domain_version",
-            domain.version,
-            "--domain_verifying_contract",
-            domain.verifyingContract,
-        ]
+        args: List[str] = []
+        if domain.name:
+            args.extend(["--domain_name", domain.name])
+        if domain.version:
+            args.extend(["--domain_version", domain.version])
+        args.extend(["--domain_verifying_contract", domain.verifyingContract])
+        return args
 

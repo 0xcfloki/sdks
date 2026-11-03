@@ -185,7 +185,7 @@ from dataclasses import replace
 # requests this maker may quote, each with the domain to sign against
 proc = rysk_sdk.execute(rysk_sdk.premium_requests_args(maker))
 
-# sign and post one quote for a request
+# sign and post quotes: one or a whole strip, in one api call
 quote = replace(
     quote_details,
     maker=maker,
@@ -194,12 +194,9 @@ quote = replace(
     validUntil=int(time.time()) + 300,   # SECONDS, now+2min .. now+10min
     domain=request.typeDataDomain,       # the pool's option handler
 )
-proc = rysk_sdk.execute(rysk_sdk.premium_quote_args(request.id, quote))
-
-# a whole strip in one api call
 with open("batch.json", "w") as f:
-    f.write(rysk_sdk.premium_quote_batch([(request.id, quote_a), (request.id, quote_b)]))
-rysk_sdk.execute(rysk_sdk.premium_quote_batch_args("batch.json"))
+    f.write(rysk_sdk.premium_quote_batch([(request.id, quote)]))
+proc = rysk_sdk.execute(rysk_sdk.premium_quote_batch_args("batch.json"))
 
 # your live quotes (the only source of quote ids), one quote, and a cancel
 rysk_sdk.execute(rysk_sdk.premium_quotes_args(maker))

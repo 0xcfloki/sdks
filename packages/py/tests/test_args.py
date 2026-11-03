@@ -79,7 +79,6 @@ def test_no_arg_builder_carries_the_private_key(sdk):
     transfer = Transfer(
         user=MAKER, amount="1", asset=ASSET, chain_id=84532, is_deposit=True, nonce="1"
     )
-    premium_quote = quote(domain=TypedDataDomain(verifyingContract=HANDLER))
 
     builders = [
         sdk.connect_args("maker"),
@@ -91,7 +90,6 @@ def test_no_arg_builder_carries_the_private_key(sdk):
         sdk.premium_requests_args(MAKER),
         sdk.premium_quotes_args(MAKER),
         sdk.premium_quote_status_args("id"),
-        sdk.premium_quote_args("rfq", premium_quote),
         sdk.premium_quote_batch_args("batch.json"),
         sdk.premium_cancel_args("id", 84532, "43"),
         sdk.premium_pools_args(),
@@ -159,19 +157,6 @@ def test_quote_sends_premium_asset_only_when_set(sdk):
     assert "--premium_asset" not in sdk.quote_args("rfq", quote())
 
 
-def test_premium_quote_carries_domain_and_request_id(sdk):
-    domain = TypedDataDomain(
-        name="PremiumOptionHandler", version="1", verifyingContract=HANDLER
-    )
-    args = sdk.premium_quote_args("req-1", quote(domain=domain))
-
-    assert args[:2] == ["premium", "quote"]
-    assert flag_value(args, "--request_id") == "req-1"
-    assert flag_value(args, "--domain_name") == "PremiumOptionHandler"
-    assert flag_value(args, "--domain_version") == "1"
-    assert flag_value(args, "--domain_verifying_contract") == HANDLER
-
-
 def test_premium_url_only_passed_when_given(sdk):
     assert "--url" not in sdk.premium_requests_args(MAKER)
     args = sdk.premium_requests_args(MAKER, "http://localhost:8080")
@@ -210,23 +195,17 @@ def test_premium_taker_builders(sdk):
 )
 def test_premium_rejects_unsignable_domains(sdk, domain, message):
     with pytest.raises(ValueError, match=message):
-        sdk.premium_quote_args("req", quote(domain=domain))
+        sdk.premium_quote_batch([("req", quote(domain=domain))])
 
 
 def test_premium_accepts_a_matching_hex_chain_id(sdk):
     domain = TypedDataDomain(verifyingContract=HANDLER, chainId="0x14a34")
-    assert sdk.premium_quote_args("req", quote(domain=domain))
+    assert sdk.premium_quote_batch([("req", quote(domain=domain))])
 
 
 def test_websocket_quote_needs_a_whole_domain(sdk):
     with pytest.raises(ValueError, match="missing version, verifyingContract"):
         sdk.quote_args("rfq", quote(domain=TypedDataDomain(name="rysk")))
-
-
-def test_premium_defaults_the_domain_name(sdk):
-    args = sdk.premium_quote_args("req", quote(domain=TypedDataDomain(verifyingContract=HANDLER)))
-    assert "--domain_name" not in args
-    assert flag_value(args, "--domain_verifying_contract") == HANDLER
 
 
 def test_premium_quote_batch_serialises_entries(sdk):

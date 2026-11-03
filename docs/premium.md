@@ -81,7 +81,7 @@ nothing. Stay under the rate limit of 30 requests a second per ip.
 ### 3. The maker quotes
 
 ```sh
-ryskV12 premium quote --batch quotes.json        # or the per quote flags
+ryskV12 premium quote --batch quotes.json        # a json array, or "-" for stdin
 ```
 
 A quote repeats the request's terms exactly and adds the maker's own fields:

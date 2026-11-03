@@ -166,33 +166,6 @@ TEST(websocket_quote_without_a_domain_sends_no_domain_flags) {
 
 // -------------------------------------------------------------- premium quote
 
-TEST(premium_quote_carries_domain_and_request_id) {
-  Rysk rysk = sdk();
-  Quote q = quote();
-  TypedDataDomain domain;
-  domain.name = "PremiumOptionHandler";
-  domain.version = "1";
-  domain.verifying_contract = HANDLER;
-  q.domain = domain;
-
-  auto args = rysk.premium_quote_args("req-1", q);
-  CHECK_EQ(args[0], std::string("premium"));
-  CHECK_EQ(args[1], std::string("quote"));
-  CHECK_EQ(flag_value(args, "--request_id"), std::string("req-1"));
-  CHECK_EQ(flag_value(args, "--domain_name"), std::string("PremiumOptionHandler"));
-  CHECK_EQ(flag_value(args, "--domain_version"), std::string("1"));
-  CHECK_EQ(flag_value(args, "--domain_verifying_contract"), std::string(HANDLER));
-}
-
-TEST(premium_defaults_the_domain_name) {
-  Quote q = quote();
-  q.domain = premium_domain();
-  auto args = sdk().premium_quote_args("req", q);
-  CHECK(!has(args, "--domain_name"));
-  CHECK(!has(args, "--domain_version"));
-  CHECK_EQ(flag_value(args, "--domain_verifying_contract"), std::string(HANDLER));
-}
-
 TEST(premium_url_only_passed_when_given) {
   Rysk rysk = sdk();
   CHECK(!has(rysk.premium_requests_args(MAKER), "--url"));
@@ -216,37 +189,42 @@ TEST(premium_url_only_passed_when_given) {
 
 TEST(premium_rejects_unsignable_domains) {
   Rysk rysk = sdk();
+  auto batch = [&](std::optional<TypedDataDomain> domain) {
+    Quote q = quote();
+    q.domain = domain;
+    return rysk.premium_quote_batch({{"req", q}});
+  };
 
-  CHECK_THROWS(rysk.premium_quote_args("req", quote()), "missing verifyingContract");
+  CHECK_THROWS(batch(std::nullopt), "missing verifyingContract, pass the request's typeDataDomain");
 
-  Quote salted = quote();
   TypedDataDomain with_salt = premium_domain();
   with_salt.salt = "0x01";
-  salted.domain = with_salt;
-  CHECK_THROWS(rysk.premium_quote_args("req", salted), "salt is not supported");
+  CHECK_THROWS(batch(with_salt), "salt is not supported");
 
-  Quote wrong_chain = quote();
   TypedDataDomain other = premium_domain();
   other.chain_id = "8453";
-  wrong_chain.domain = other;
-  CHECK_THROWS(rysk.premium_quote_args("req", wrong_chain),
-               "does not match the quote's chain 84532");
+  CHECK_THROWS(batch(other), "does not match the quote's chain 84532");
 
-  Quote unparseable = quote();
   TypedDataDomain text = premium_domain();
   text.chain_id = "mainnet";
-  unparseable.domain = text;
-  CHECK_THROWS(rysk.premium_quote_args("req", unparseable), "does not match");
+  CHECK_THROWS(batch(text), "does not match");
+
+  // the server marshals chain ids as hex strings, so 0x14a34 is 84532
+  TypedDataDomain hex = premium_domain();
+  hex.chain_id = "0x14a34";
+  CHECK(!batch(hex).empty());
 }
 
-TEST(premium_accepts_a_matching_hex_chain_id) {
-  // the server marshals chain ids as hex strings, so 0x14a34 is 84532
+TEST(websocket_quote_sends_a_whole_domain) {
   Quote q = quote();
   TypedDataDomain domain = premium_domain();
-  domain.chain_id = "0x14a34";
+  domain.name = "rysk";
+  domain.version = "0.0.0";
   q.domain = domain;
-  CHECK_EQ(flag_value(sdk().premium_quote_args("req", q), "--domain_verifying_contract"),
-           std::string(HANDLER));
+  auto args = sdk().quote_args("rfq", q);
+  CHECK_EQ(flag_value(args, "--domain_name"), std::string("rysk"));
+  CHECK_EQ(flag_value(args, "--domain_version"), std::string("0.0.0"));
+  CHECK_EQ(flag_value(args, "--domain_verifying_contract"), std::string(HANDLER));
 }
 
 // ---------------------------------------------------------------------- batch
@@ -281,7 +259,10 @@ TEST(premium_quote_batch_serialises_entries) {
 
 TEST(premium_quote_batch_refuses_unsignable_entries) {
   // nothing is written when one entry could not be signed
-  CHECK_THROWS(sdk().premium_quote_batch({{"req", quote()}}), "missing verifyingContract");
+  Quote good = quote();
+  good.domain = premium_domain();
+  CHECK_THROWS(sdk().premium_quote_batch({{"req-0", good}, {"req-1", quote()}}),
+               "missing verifyingContract");
 }
 
 // ------------------------------------------------------------------- the key
@@ -313,7 +294,6 @@ TEST(no_arg_builder_carries_the_private_key) {
       rysk.premium_requests_args(MAKER),
       rysk.premium_quotes_args(MAKER),
       rysk.premium_quote_status_args("id"),
-      rysk.premium_quote_args("rfq", signed_quote),
       rysk.premium_quote_batch_args("batch.json"),
       rysk.premium_cancel_args("id", 84532, "43"),
       rysk.premium_request_args("requests.json", 84532, "44"),

@@ -53,7 +53,9 @@ let quote = Quote {
     domain: request.type_data_domain.clone(),
 };
 
-let args = sdk.premium_quote_args(&request_id, &quote, None)?;
+// quotes are posted as a batch: a json array, from a file or `-` for stdin
+std::fs::write("quotes.json", sdk.premium_quote_batch(&[(request_id, quote)])?)?;
+let args = sdk.premium_quote_batch_args("quotes.json", None);
 let status = sdk.execute_lines(&args, |line| println!("{line}"))?;
 ```
 

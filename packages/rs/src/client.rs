@@ -339,54 +339,13 @@ impl Rysk {
         if let Some(premium) = quote.premium_asset.as_deref().filter(|p| !p.is_empty()) {
             pair(&mut args, "--premium_asset", premium);
         }
-        args.extend(self.domain_args(quote)?);
+        args.extend(domain_args(quote, false)?);
         if quote.is_put {
             args.push("--is_put".into());
         }
         if quote.is_taker_buy {
             args.push("--is_taker_buy".into());
         }
-        Ok(args)
-    }
-
-    /// Turns a request's domain into the cli's domain flags. The cli takes the
-    /// domain's chain id from the quote, so a domain for another chain, or one
-    /// using a salt, cannot be signed and is rejected here rather than silently
-    /// signed against the wrong domain.
-    fn domain_args(&self, quote: &Quote) -> Result<Vec<String>, Error> {
-        let Some(domain) = quote.domain.as_ref() else {
-            return Ok(Vec::new());
-        };
-        check_shared_domain(domain, quote.chain_id, "quote domain")?;
-
-        let missing: Vec<&str> = [
-            ("name", domain.name.as_deref()),
-            ("version", domain.version.as_deref()),
-            ("verifyingContract", domain.verifying_contract.as_deref()),
-        ]
-        .into_iter()
-        .filter(|(_, v)| v.map_or(true, str::is_empty))
-        .map(|(k, _)| k)
-        .collect();
-        if !missing.is_empty() {
-            return Err(Error::Domain(format!(
-                "quote domain: missing {}",
-                missing.join(", ")
-            )));
-        }
-
-        let mut args = Vec::new();
-        pair(&mut args, "--domain_name", domain.name.as_deref().unwrap());
-        pair(
-            &mut args,
-            "--domain_version",
-            domain.version.as_deref().unwrap(),
-        );
-        pair(
-            &mut args,
-            "--domain_verifying_contract",
-            domain.verifying_contract.as_deref().unwrap(),
-        );
         Ok(args)
     }
 
@@ -448,37 +407,6 @@ impl Rysk {
         }
     }
 
-    /// The premium api signs against the pool's option handler, which arrives on
-    /// the request as `typeDataDomain`. Only the verifying contract is
-    /// required (the cli defaults the name and version), but a domain it
-    /// cannot sign is rejected here rather than passed on.
-    fn premium_domain_args(&self, quote: &Quote) -> Result<Vec<String>, Error> {
-        let verifying = quote
-            .domain
-            .as_ref()
-            .and_then(|d| d.verifying_contract.as_deref())
-            .filter(|v| !v.is_empty())
-            .ok_or_else(|| {
-                Error::Domain(
-                    "premium quote domain: missing verifyingContract, pass the request's \
-                     typeDataDomain"
-                        .to_string(),
-                )
-            })?;
-        let domain = quote.domain.as_ref().expect("checked above");
-        check_shared_domain(domain, quote.chain_id, "premium quote domain")?;
-
-        let mut args = Vec::new();
-        if let Some(name) = domain.name.as_deref().filter(|n| !n.is_empty()) {
-            pair(&mut args, "--domain_name", name);
-        }
-        if let Some(version) = domain.version.as_deref().filter(|v| !v.is_empty()) {
-            pair(&mut args, "--domain_version", version);
-        }
-        pair(&mut args, "--domain_verifying_contract", verifying);
-        Ok(args)
-    }
-
     /// Requests this maker may quote, each carrying the domain to sign against.
     pub fn premium_requests_args(&self, maker: &str, url: Option<&str>) -> Vec<String> {
         let mut args = vec!["premium".to_string(), "requests".to_string()];
@@ -501,39 +429,6 @@ impl Rysk {
         pair(&mut args, "--id", id);
         args.extend(self.premium_url_args(url));
         args
-    }
-
-    /// Signs and posts one quote. The terms have to be the request's - the api
-    /// rebuilds the signed message from the stored request, and `valid_until`
-    /// is in seconds, strictly between now+2min and now+10min.
-    pub fn premium_quote_args(
-        &self,
-        request_id: &str,
-        quote: &Quote,
-        url: Option<&str>,
-    ) -> Result<Vec<String>, Error> {
-        let mut args = vec!["premium".to_string(), "quote".to_string()];
-        pair(&mut args, "--request_id", request_id);
-        pair(&mut args, "--asset", &quote.asset_address);
-        pair(&mut args, "--chain_id", quote.chain_id.to_string());
-        pair(&mut args, "--expiry", quote.expiry.to_string());
-        pair(&mut args, "--strike", &quote.strike);
-        pair(&mut args, "--quantity", &quote.quantity);
-        pair(&mut args, "--usd", &quote.usd);
-        pair(&mut args, "--collateral", &quote.collateral_asset);
-        pair(&mut args, "--maker", &quote.maker);
-        pair(&mut args, "--nonce", &quote.nonce);
-        pair(&mut args, "--price", &quote.price);
-        pair(&mut args, "--valid_until", quote.valid_until.to_string());
-        args.extend(self.premium_domain_args(quote)?);
-        args.extend(self.premium_url_args(url));
-        if quote.is_put {
-            args.push("--is_put".into());
-        }
-        if quote.is_taker_buy {
-            args.push("--is_taker_buy".into());
-        }
-        Ok(args)
     }
 
     /// Posts a batch of quotes in one call, reading them from `source`: a file
@@ -559,7 +454,7 @@ impl Rysk {
 
         let mut entries = Vec::with_capacity(quotes.len());
         for (request_id, quote) in quotes {
-            self.premium_domain_args(quote)?;
+            domain_args(quote, true)?;
             entries.push(Entry {
                 quote,
                 request_id: request_id.as_str(),
@@ -657,28 +552,68 @@ impl Rysk {
     }
 }
 
-/// The two rejections both domains share: a salt cannot be signed, and a chain
-/// that is not the quote's would be signed against the wrong domain.
-fn check_shared_domain(
-    domain: &TypedDataDomain,
-    quote_chain_id: i64,
-    what: &str,
-) -> Result<(), Error> {
-    if domain.salt.as_deref().is_some_and(|s| !s.is_empty()) {
-        return Err(Error::Domain(format!("{what}: salt is not supported")));
+/// Turns a quote's domain into the cli's domain flags, rejecting one the cli
+/// could not sign - a salt, or another chain's chain id - rather than signing
+/// against the wrong domain. The websocket quote takes the domain all or
+/// nothing; a premium quote has to name the pool's option handler, and the cli
+/// defaults its name and version.
+fn domain_args(quote: &Quote, premium: bool) -> Result<Vec<String>, Error> {
+    let domain = match quote.domain.as_ref() {
+        None if !premium => return Ok(Vec::new()),
+        d => d,
+    };
+    let field =
+        |f: fn(&TypedDataDomain) -> Option<&str>| domain.and_then(f).filter(|v| !v.is_empty());
+    if field(|d| d.salt.as_deref()).is_some() {
+        return Err(Error::Domain("quote domain: salt is not supported".into()));
     }
-    if let Some(chain) = domain.chain_id.as_ref() {
-        if chain.as_i64() != Some(quote_chain_id) {
+    if let Some(chain) = domain.and_then(|d| d.chain_id.as_ref()) {
+        if chain.as_i64() != Some(quote.chain_id) {
             let shown = match chain {
                 crate::models::ChainId::Number(n) => n.to_string(),
                 crate::models::ChainId::Text(s) => s.clone(),
             };
             return Err(Error::Domain(format!(
-                "{what}: chainId {shown} does not match the quote's chain {quote_chain_id}"
+                "quote domain: chainId {shown} does not match the quote's chain {}",
+                quote.chain_id
             )));
         }
     }
-    Ok(())
+
+    let name = field(|d| d.name.as_deref());
+    let version = field(|d| d.version.as_deref());
+    let verifying = field(|d| d.verifying_contract.as_deref());
+    let required = [
+        ("name", name.is_some() || premium),
+        ("version", version.is_some() || premium),
+        ("verifyingContract", verifying.is_some()),
+    ];
+    let missing: Vec<&str> = required
+        .into_iter()
+        .filter(|(_, ok)| !ok)
+        .map(|(k, _)| k)
+        .collect();
+    if !missing.is_empty() {
+        return Err(Error::Domain(format!(
+            "quote domain: missing {}{}",
+            missing.join(", "),
+            if premium {
+                ", pass the request's typeDataDomain"
+            } else {
+                ""
+            }
+        )));
+    }
+
+    let mut args = Vec::new();
+    if let Some(name) = name {
+        pair(&mut args, "--domain_name", name);
+    }
+    if let Some(version) = version {
+        pair(&mut args, "--domain_version", version);
+    }
+    pair(&mut args, "--domain_verifying_contract", verifying.unwrap());
+    Ok(args)
 }
 
 #[cfg(test)]
