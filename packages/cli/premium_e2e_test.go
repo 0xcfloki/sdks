@@ -79,7 +79,9 @@ func TestPremiumE2E(t *testing.T) {
 
 	// 5-6
 	second := postQuote(t, apiURL, makerKey, maker, request)
-	approvePremium(t, rpcURL, makerKey, request.ChainID, pool.Asset, pool.OptionHandler)
+	// the option handler pulls the premium with transferFrom when the trade
+	// settles; 1 token covers a 1 wei premium per run for good
+	e2eApprove(t, rpcURL, makerKey, request.ChainID, pool.Asset, pool.OptionHandler, big.NewInt(1), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 	quote := selectQuote(t, apiURL, request.ID, second)
 	txHash := takeTrade(t, apiURL, takerKey, quote)
 	waitMined(t, rpcURL, txHash)
@@ -343,13 +345,9 @@ func takeTrade(t *testing.T, apiURL string, takerKey string, quote e2eQuote) str
 	return txHash
 }
 
-// approvePremium lets the option handler pull the maker's premium. The handler
-// takes it with transferFrom when the trade settles, so without an allowance the
-// trade reverts. It only sends a transaction when there is no allowance at all.
-//
-// ponytail: approves 1 token (1e18 base units) once, which covers a 1 wei premium
-// per run for good; approve more when the test prices quotes above 1 wei.
-func approvePremium(t *testing.T, rpcURL string, makerKey string, chainID int, asset string, spender string) {
+// e2eApprove lets spender pull asset from key's account, sending an approval for
+// amount only when the allowance is below need, so most runs send nothing.
+func e2eApprove(t *testing.T, rpcURL string, makerKey string, chainID int, asset string, spender string, need *big.Int, amount *big.Int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -371,14 +369,14 @@ func approvePremium(t *testing.T, rpcURL string, makerKey string, chainID int, a
 	if err != nil {
 		t.Fatalf("allowance: %v", err)
 	}
-	if allowance.Sign() > 0 {
+	if allowance.Cmp(need) >= 0 {
 		return
 	}
 	opts, err := account.newTransactionOpts(ctx, chainID, *client)
 	if err != nil {
 		t.Fatalf("transaction opts: %v", err)
 	}
-	tx, err := token.Approve(opts, common.HexToAddress(spender), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	tx, err := token.Approve(opts, common.HexToAddress(spender), amount)
 	if err != nil {
 		t.Fatalf("approve %s to %s: %v", asset, spender, err)
 	}

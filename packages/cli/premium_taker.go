@@ -173,29 +173,6 @@ func premiumAuthed(c *Context, method string, path string, body []byte) error {
 	return nil
 }
 
-// premiumConfirmationType is the Confirmation struct a taker signs to accept a
-// quote. The field order is part of the typehash, so it has to match the option
-// handler's exactly.
-var premiumConfirmationType = []apitypes.Type{
-	{Name: "maker", Type: "address"},
-	{Name: "assetAddress", Type: "address"},
-	{Name: "chainId", Type: "uint256"},
-	{Name: "expiry", Type: "uint64"},
-	{Name: "isPut", Type: "bool"},
-	{Name: "nonce", Type: "uint64"},
-	{Name: "price", Type: "uint256"},
-	{Name: "quantity", Type: "uint256"},
-	{Name: "quoteNonce", Type: "uint64"},
-	{Name: "quoteSignature", Type: "bytes"},
-	{Name: "strike", Type: "uint256"},
-	{Name: "taker", Type: "address"},
-	{Name: "isTakerBuy", Type: "bool"},
-	{Name: "usd", Type: "address"},
-	{Name: "collateralAsset", Type: "address"},
-	{Name: "collateralAmount", Type: "uint256"},
-	{Name: "gasFee", Type: "uint256"},
-}
-
 type premiumStoredQuote struct {
 	RequestID  string `json:"requestId"`
 	Maker      string `json:"maker"`
@@ -287,7 +264,7 @@ func premiumExecute(c *Context) error {
 	hash, err := EncodeTypedData(&apitypes.TypedData{
 		Types: apitypes.Types{
 			"EIP712Domain": (*EIP712_TYPES)["EIP712Domain"],
-			"Confirmation": premiumConfirmationType,
+			"Confirmation": confirmationType,
 		},
 		PrimaryType: "Confirmation",
 		Domain:      *domain,

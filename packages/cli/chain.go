@@ -109,7 +109,7 @@ func (a *Account) newTransactionOpts(ctx context.Context, chainID int, c ethclie
 	return opts, nil
 }
 
-func (a *Account) approve(ctx context.Context, chainID int, client ethclient.Client, amount *big.Int, asset common.Address) (txHash string, err error) {
+func (a *Account) approve(ctx context.Context, chainID int, client ethclient.Client, amount *big.Int, asset common.Address, spender common.Address) (txHash string, err error) {
 	opts, err := a.newTransactionOpts(ctx, chainID, client)
 	if err != nil {
 		return "", nil
@@ -120,7 +120,7 @@ func (a *Account) approve(ctx context.Context, chainID int, client ethclient.Cli
 		return "", err
 	}
 
-	tx, err := erc20.Approve(opts, ADDRESSES[chainID].MMarket, amount)
+	tx, err := erc20.Approve(opts, spender, amount)
 	if err != nil {
 		return "", err
 	}

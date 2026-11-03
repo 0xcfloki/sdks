@@ -67,6 +67,9 @@ Flags
 - `--rpc_url` (**required**): The URL of the Ethereum RPC endpoint.
 - `--amount` (**required**): The amount of the asset to approve for spending.
 - `--private_key` (**required**): The private key of the Ethereum account performing the approval.
+- `--asset`: The asset to approve; defaults to the chain's strike asset.
+- `--spender`: Who may spend it; defaults to the chain's mmarket, which maker deposits go through. A v12
+  taker approves its collateral to the chain's margin pool instead.
 
 ---
 
@@ -96,7 +99,8 @@ Flags
 
 - `--url` (**required**): WebSocket URL to connect to.
 
-Commands for the connection - `balances`, `positions`, `quote`, `transfer` and `will_redeem` - are written to its
+Commands for the connection - `balances`, `positions`, `quote`, `transfer` and `will_redeem` for a maker,
+`inventory`, `request` and `confirm` for a taker - are written to its
 stdin, one json array of args per line, exactly as they would follow `./ryskV12` on the command line.
 They run in order inside the connect process, so nothing is spawned per message:
 
@@ -117,6 +121,19 @@ Endpoints:
 
 - `wss://<base_url>/rfqs/<asset_address>` listen for rfqs for the specified asset
 - `wss://<base_url>/maker` endpoint to send quotes and transfer requests
+- `wss://<base_url>/taker` endpoint to request rfqs and confirm them
+
+The v12 taker commands, on a `/taker` connection (see [`docs/v12.md`](../../docs/v12.md) for the flow):
+
+```json
+["inventory"]
+["request", "--asset", "0x…", "--chain_id", "8453", "--expiry", "<listed expiry>", "--strike", "<listed strike, 1e8>", "--quantity", "<1e18>", "--taker", "<0xtaker>", "--usd", "0x…", "--collateral", "0x…"]
+["confirm", "--quote", "<the request's answer, as json>", "--nonce", "<n>"]
+```
+
+`request` is answered with the auction's winning quote, under id `request`. `confirm` reads the gas fee
+from `/api/gas` on the connect's host (override with `--api_url`), signs the confirmation with
+`RYSK_PRIVATE_KEY` and is answered with the settling transaction's hash, under id `confirm`.
 
 ---
 

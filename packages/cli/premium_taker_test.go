@@ -65,14 +65,14 @@ func TestPremiumExecuteSignsTheStoredQuote(t *testing.T) {
 	}
 
 	message := map[string]any{}
-	for _, f := range premiumConfirmationType {
+	for _, f := range confirmationType {
 		message[f.Name] = posted[f.Name]
 	}
 	message["chainId"] = strconv.Itoa(int(posted["chainId"].(float64)))
 	message["expiry"] = strconv.Itoa(int(posted["expiry"].(float64)))
 	domain, _ := premiumQuoteDomain(84532, &premiumDomainInput{VerifyingContract: testOptionHandler})
 	hash, err := EncodeTypedData(&apitypes.TypedData{
-		Types:       apitypes.Types{"EIP712Domain": (*EIP712_TYPES)["EIP712Domain"], "Confirmation": premiumConfirmationType},
+		Types:       apitypes.Types{"EIP712Domain": (*EIP712_TYPES)["EIP712Domain"], "Confirmation": confirmationType},
 		PrimaryType: "Confirmation",
 		Domain:      *domain,
 		Message:     message,

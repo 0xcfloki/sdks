@@ -38,6 +38,10 @@ var approveAction = &Command{
 			Required: false,
 			Usage:    "address of the asset to approve (defaults to the chain's strike asset)",
 		},
+		&StringFlag{
+			Name:  "spender",
+			Usage: "address allowed to spend it (defaults to the chain's mmarket, which maker deposits pull through; a taker's collateral goes to the margin pool)",
+		},
 	},
 	Action: func(c *Context) error {
 		return approve(c)
@@ -70,7 +74,15 @@ func approve(c *Context) error {
 		return err
 	}
 
-	txHash, err := account.approve(c.Context, chain_id, *client, bigAmount, asset)
+	spender := ADDRESSES[chain_id].MMarket
+	if spenderArg := c.String("spender"); spenderArg != "" {
+		if !common.IsHexAddress(spenderArg) {
+			return fmt.Errorf("invalid spender %q", spenderArg)
+		}
+		spender = common.HexToAddress(spenderArg)
+	}
+
+	txHash, err := account.approve(c.Context, chain_id, *client, bigAmount, asset, spender)
 	if err != nil {
 		return err
 	}

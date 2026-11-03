@@ -14,10 +14,13 @@ var app = &Command{
 	Subcommands: []*Command{
 		approveAction,
 		balancesAction,
+		confirmAction,
 		connectAction,
+		inventoryAction,
 		positionsAction,
 		premiumAction,
 		quoteAction,
+		requestAction,
 		selfRedeemAction,
 		transferAction,
 		versionAction,

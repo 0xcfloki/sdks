@@ -44,13 +44,19 @@ var send = func(payload any) error {
 // channelApp runs the commands connect reads from stdin: only the ones that
 // write to the websocket.
 var channelApp = &Command{
-	Name:        "ryskV12",
-	Subcommands: []*Command{balancesAction, positionsAction, quoteAction, transferAction, willRedeemAction},
+	Name: "ryskV12",
+	Subcommands: []*Command{
+		// maker
+		balancesAction, positionsAction, quoteAction, transferAction, willRedeemAction,
+		// taker
+		inventoryAction, requestAction, confirmAction,
+	},
 }
 
 func connect(c *Context) error {
 	ctx, cancel := context.WithCancel(c.Context)
-	conn, _, err := websocket.DefaultDialer.Dial(c.String("url"), nil)
+	connectURL = c.String("url")
+	conn, _, err := websocket.DefaultDialer.Dial(connectURL, nil)
 	if err != nil {
 		log.Fatalf("failed to connect: %v", err)
 	}
