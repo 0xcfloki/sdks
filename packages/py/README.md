@@ -240,34 +240,6 @@ rysk_sdk.execute(rysk_sdk.premium_execute_args(quote_id, "46"))
 
 See the CLI README for the request fields; note a request's `validUntil` is in **milliseconds**.
 
-## Examples
-
-Two runnable maker loops live in `examples/`, one per transport:
-
-| File | What it does |
-| --- | --- |
-| `examples/run_example.py` | Websocket flow: holds the maker connection open, listens for RFQs on an asset, prices them and sends signed quotes back through the maker connection. Also reads balances and positions, and disconnects both connections on `SIGINT`. |
-| `examples/run_premium_example.py` | Premium RFQ flow: polls the requests this maker may quote, prices them, posts the batch in one api call, matches quote ids back from the listing, refreshes each quote before its 10 minute window closes, and pulls everything on `SIGINT`. |
-
-```sh
-RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> python examples/run_example.py
-
-RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> \
-  PREMIUM_URL=https://insti-testnet.rysk.finance python examples/run_premium_example.py
-```
-
-Both keep their nonce counter in a `.rysk-nonce` file through `NonceCounter`, because a nonce is spent
-once per address and a counter that rewinds after a restart starts failing every write.
-`price_request` is the only part meant to be replaced — everything else is the plumbing the api
-expects.
-
-```python
-from ryskV12.nonce import NonceCounter
-
-nonces = NonceCounter(".rysk-nonce")  # one counter per signing key
-quote_nonce = nonces.next()           # decimal string, never reused, never rewound
-```
-
 ## Tests
 
 ```sh
@@ -278,3 +250,8 @@ make dev-bin && poetry run pytest # + the integration tests, which need a cli
 
 `tests/integration` runs the real CLI against a fake api, so the arg builders and the binary cannot
 drift apart. Those tests skip themselves when no CLI is present.
+
+The `testnet` test at the bottom of `tests/integration/test_premium_cli.py` is the full premium flow end to end
+against the real testnet api — a taker opens an rfq, the maker quotes, cancels and requotes, and
+the taker takes the trade on chain. Read it as the worked example. It skips unless the e2e keys are
+set; `make e2e` from the repo root loads them from `.env`.

@@ -235,33 +235,6 @@ ryskSDK.execute(ryskSDK.premiumExecuteArgs(quoteId, "46"));
 
 See the CLI README for the request fields; note a request's `validUntil` is in **milliseconds**.
 
-## Examples
-
-Two runnable maker loops live in `examples/`, one per transport:
-
-| File | What it does |
-| --- | --- |
-| `examples/run.js` | Websocket flow: holds the maker connection open, listens for RFQs on an asset, prices them and sends them into the maker connection, which signs and sends each quote. Also reads balances and positions, and closes both connections on `SIGINT`. |
-| `examples/premium.js` | Premium RFQ flow: polls the requests this maker may quote, prices them, posts the batch in one api call, matches quote ids back from the listing, refreshes each quote before its 10 minute window closes, and pulls everything on `SIGINT`. |
-
-```sh
-RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> node examples/run.js
-
-RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> \
-  PREMIUM_URL=https://insti-testnet.rysk.finance node examples/premium.js
-```
-
-Both keep their nonce counter in a `.rysk-nonce` file through `NonceCounter`, because a nonce is spent
-once per address and a counter that rewinds after a restart starts failing every write. `priceRequest`
-is the only part meant to be replaced — everything else is the plumbing the api expects.
-
-```ts
-import { NonceCounter } from "ryskv12";
-
-const nonces = new NonceCounter(".rysk-nonce"); // one counter per signing key
-const quoteNonce = nonces.next();               // decimal string, never reused, never rewound
-```
-
 ## Tests
 
 ```sh
@@ -271,3 +244,8 @@ make dev-bin && yarn test     # + the integration tests, which need a cli
 
 `test/integration.test.js` runs the real CLI against a fake api, so the arg builders and the binary
 cannot drift apart. Those tests skip themselves when no CLI is present.
+
+The `testnet` test at the bottom of `test/integration.test.js` is the full premium flow end to end
+against the real testnet api — a taker opens an rfq, the maker quotes, cancels and requotes, and
+the taker takes the trade on chain. Read it as the worked example. It skips unless the e2e keys are
+set; `make e2e` from the repo root loads them from `.env`.

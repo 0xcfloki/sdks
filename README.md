@@ -35,7 +35,7 @@ make help        # everything else
 
 `make dev-bin` puts a locally built binary at `packages/ts/ryskV12`,
 `packages/py/ryskV12cli`, `packages/rs/ryskV12` and `packages/cpp/ryskV12` — the paths each SDK's
-examples and integration tests already look in — so they exercise your working
+integration tests already look in — so they exercise your working
 tree, not a published release. Every SDK's integration tests skip themselves
 when that binary is absent.
 
