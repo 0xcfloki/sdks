@@ -454,8 +454,7 @@ fn testnet_open_an_rfq_quote_cancel_requote_and_take_the_trade() {
         request = list(&mk, mk.premium_requests_args(&maker, url))
             .into_iter()
             .filter_map(|r| serde_json::from_value::<Request>(r).ok())
-            .filter(|r| r.taker.to_lowercase() == pool_addr)
-            .next_back();
+            .rfind(|r| r.taker.to_lowercase() == pool_addr);
         if request.is_some() {
             break;
         }
