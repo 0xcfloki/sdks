@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
+	crypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/goccy/go-json"
 )
 
@@ -243,5 +245,41 @@ func TestQuotePayloadCarriesPremiumAsset(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), `"premiumAsset":"`+q.PremiumAsset+`"`) {
 		t.Errorf("premiumAsset missing from payload: %s", encoded)
+	}
+}
+
+// RYSK_PRIVATE_KEY is often 0x prefixed (the ts readme writes it that way), and
+// approve and taker already take it so. Signing has to take it the same way and
+// sign as the same account.
+func TestSignAcceptsHexPrefixedKey(t *testing.T) {
+	hash, _, err := CreateQuoteMessage(testQuote(), nil)
+	if err != nil {
+		t.Fatalf("CreateQuoteMessage: %v", err)
+	}
+
+	bare, err := Sign(hash, testPrivateKey)
+	if err != nil {
+		t.Fatalf("Sign bare key: %v", err)
+	}
+	prefixed, err := Sign(hash, "0x"+testPrivateKey)
+	if err != nil {
+		t.Fatalf("Sign 0x key: %v", err)
+	}
+	if prefixed != bare {
+		t.Errorf("0x key signed %s, bare key signed %s", prefixed, bare)
+	}
+
+	account, err := newAccountFromPrivateKey("0x" + testPrivateKey)
+	if err != nil {
+		t.Fatalf("newAccountFromPrivateKey: %v", err)
+	}
+	sig := common.FromHex(prefixed)
+	sig[64] -= 27
+	pub, err := crypto.SigToPub(hash, sig)
+	if err != nil {
+		t.Fatalf("SigToPub: %v", err)
+	}
+	if got := crypto.PubkeyToAddress(*pub); got != account.Public {
+		t.Errorf("signature recovers to %s, want %s", got, account.Public)
 	}
 }

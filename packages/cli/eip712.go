@@ -131,9 +131,10 @@ func EncodeTypedData(typedData *apitypes.TypedData) (common.Hash, error) {
 	return hash, err
 }
 
-// Signs msg with EIP712 signing scheme
+// Signs msg with EIP712 signing scheme. The key is hex, with or without a 0x
+// prefix, as newAccountFromPrivateKey takes it.
 func Sign(message []byte, privateKey string) (string, error) {
-	privateKeyEcdsa, err := crypto.HexToECDSA(privateKey)
+	privateKeyEcdsa, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
 	if err != nil {
 		return "", err
 	}
