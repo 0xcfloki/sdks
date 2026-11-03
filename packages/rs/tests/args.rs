@@ -273,6 +273,60 @@ fn premium_url_only_passed_when_given() {
         &sdk.premium_quote_batch_args("f.json", Some("http://x")),
         "--url"
     ));
+    for args in [
+        sdk.premium_pools_args(Some("http://x")),
+        sdk.premium_request_args("r.json", 1, "1", Some("http://x")),
+        sdk.premium_taker_requests_args(MAKER, Some("http://x")),
+        sdk.premium_request_quotes_args("id", Some("http://x")),
+        sdk.premium_cancel_request_args("id", 1, "1", Some("http://x")),
+        sdk.premium_execute_args("id", "1", Some("http://x")),
+    ] {
+        assert_eq!(flag_value(&args, "--url"), "http://x", "{args:?}");
+    }
+}
+
+#[test]
+fn premium_taker_builders_spell_the_cli_flags() {
+    let sdk = sdk();
+    assert_eq!(sdk.premium_pools_args(None), ["premium", "pools"]);
+    assert_eq!(
+        sdk.premium_request_args("r.json", 84532, "7", None),
+        [
+            "premium",
+            "request",
+            "--batch",
+            "r.json",
+            "--chain_id",
+            "84532",
+            "--nonce",
+            "7"
+        ]
+    );
+    assert_eq!(
+        sdk.premium_taker_requests_args(MAKER, None),
+        ["premium", "taker-requests", "--taker", MAKER]
+    );
+    assert_eq!(
+        sdk.premium_request_quotes_args("req", None),
+        ["premium", "request-quotes", "--id", "req"]
+    );
+    assert_eq!(
+        sdk.premium_cancel_request_args("req", 84532, "8", None),
+        [
+            "premium",
+            "cancel-request",
+            "--id",
+            "req",
+            "--chain_id",
+            "84532",
+            "--nonce",
+            "8"
+        ]
+    );
+    assert_eq!(
+        sdk.premium_execute_args("q", "9", None),
+        ["premium", "execute", "--quote_id", "q", "--nonce", "9"]
+    );
 }
 
 #[test]
@@ -448,6 +502,11 @@ fn no_arg_builder_carries_the_private_key() {
         sdk.premium_quote_args("rfq", &with_domain, None).unwrap(),
         sdk.premium_quote_batch_args("batch.json", None),
         sdk.premium_cancel_args("id", 84532, "43", None),
+        sdk.premium_request_args("r.json", 84532, "1", None),
+        sdk.premium_cancel_request_args("id", 84532, "1", None),
+        sdk.premium_execute_args("id", "1", None),
+        sdk.will_redeem_args(84532, MAKER, ASSET, true, "1"),
+        sdk.self_redeem_args(84532, "1", None, &[], None),
     ];
 
     for args in builders {
@@ -493,4 +552,60 @@ fn nonce_counter_never_repeats_or_rewinds() {
     assert_eq!(fresh.last(), 0);
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn will_redeem_and_self_redeem_spell_the_cli_flags() {
+    let sdk = sdk();
+    assert_eq!(
+        sdk.will_redeem_args(84532, MAKER, ASSET, true, "7"),
+        [
+            "will_redeem",
+            "--chain_id",
+            "84532",
+            "--account",
+            MAKER,
+            "--otoken",
+            ASSET,
+            "--nonce",
+            "7",
+            "--will_redeem"
+        ]
+    );
+    assert!(!sdk
+        .will_redeem_args(84532, MAKER, ASSET, false, "7")
+        .contains(&"--will_redeem".to_string()));
+    assert_eq!(
+        sdk.self_redeem_args(84532, "8", None, &[], None),
+        [
+            "self-redeem",
+            "--url",
+            "https://rip-testnet.rysk.finance",
+            "--chain_id",
+            "84532",
+            "--nonce",
+            "8"
+        ]
+    );
+    let exclude = format!("{ASSET},{MAKER}");
+    assert_eq!(
+        sdk.self_redeem_args(
+            84532,
+            "8",
+            Some(1767225600),
+            &[ASSET, MAKER],
+            Some("http://x")
+        )[2..],
+        [
+            "http://x",
+            "--chain_id",
+            "84532",
+            "--nonce",
+            "8",
+            "--expiry",
+            "1767225600",
+            "--exclude_assets",
+            exclude.as_str()
+        ]
+    );
 }

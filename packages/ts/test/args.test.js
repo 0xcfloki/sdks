@@ -85,6 +85,11 @@ test("no arg builder carries the private key", () => {
     rysk.premiumQuoteArgs("rfq", quote({ domain: { verifyingContract: HANDLER } })),
     rysk.premiumQuoteBatchArgs("batch.json"),
     rysk.premiumCancelArgs("id", 84532, "43"),
+    rysk.premiumRequestArgs("requests.json", 84532, "44"),
+    rysk.premiumCancelRequestArgs("id", 84532, "45"),
+    rysk.premiumExecuteArgs("7", "46"),
+    rysk.willRedeemArgs(84532, MAKER, ASSET, true, "1"),
+    rysk.selfRedeemArgs(84532, "1"),
   ];
 
   for (const args of builders) {
@@ -343,4 +348,18 @@ test("an error carries its free form data through", () => {
   const err = { code: -32000, message: "nope", data: { why: "late" } };
   assert.ok(isErrorData(err));
   assert.deepEqual(err.data, { why: "late" });
+});
+
+test("will_redeem and self-redeem spell the cli's flags", () => {
+  const rysk = sdk();
+  assert.deepEqual(rysk.willRedeemArgs(84532, MAKER, ASSET, true, "7"), [
+    "will_redeem", "--chain_id", "84532", "--account", MAKER, "--otoken", ASSET, "--nonce", "7", "--will_redeem",
+  ]);
+  assert.ok(!rysk.willRedeemArgs(84532, MAKER, ASSET, false, "7").includes("--will_redeem"));
+  assert.deepEqual(rysk.selfRedeemArgs(84532, "8"), [
+    "self-redeem", "--url", "https://rip-testnet.rysk.finance", "--chain_id", "84532", "--nonce", "8",
+  ]);
+  assert.deepEqual(rysk.selfRedeemArgs(84532, "8", 1767225600, [ASSET, MAKER], "http://x").slice(2), [
+    "http://x", "--chain_id", "84532", "--nonce", "8", "--expiry", "1767225600", "--exclude_assets", `${ASSET},${MAKER}`,
+  ]);
 });

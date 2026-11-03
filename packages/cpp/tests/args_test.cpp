@@ -67,6 +67,21 @@ TEST(connect_addresses_the_env_url) {
            (std::vector<std::string>{"connect", "--url", "wss://rip-testnet.rysk.finance/maker"}));
 }
 
+TEST(will_redeem_and_self_redeem_spell_the_cli_flags) {
+  Rysk rysk = sdk();
+  CHECK_EQ(rysk.will_redeem_args(84532, MAKER, ASSET, true, "7"),
+           (std::vector<std::string>{"will_redeem", "--chain_id", "84532", "--account", MAKER,
+                                     "--otoken", ASSET, "--nonce", "7", "--will_redeem"}));
+  CHECK(!has(rysk.will_redeem_args(84532, MAKER, ASSET, false, "7"), "--will_redeem"));
+  CHECK_EQ(rysk.self_redeem_args(84532, "8"),
+           (std::vector<std::string>{"self-redeem", "--url", "https://rip-testnet.rysk.finance",
+                                     "--chain_id", "84532", "--nonce", "8"}));
+  auto full = rysk.self_redeem_args(84532, "8", 1767225600, {ASSET, MAKER}, std::string("http://x"));
+  CHECK_EQ(flag_value(full, "--url"), std::string("http://x"));
+  CHECK_EQ(flag_value(full, "--expiry"), std::string("1767225600"));
+  CHECK_EQ(flag_value(full, "--exclude_assets"), std::string(ASSET) + "," + MAKER);
+}
+
 TEST(every_env_has_its_own_url) {
   CHECK_EQ(std::string(base_url(Env::Local)), std::string("ws://localhost:8000/"));
   CHECK_EQ(std::string(base_url(Env::Testnet)), std::string("wss://rip-testnet.rysk.finance/"));
@@ -190,6 +205,13 @@ TEST(premium_url_only_passed_when_given) {
   CHECK(has(rysk.premium_quote_status_args("id", url), "--url"));
   CHECK(has(rysk.premium_cancel_args("id", 1, "1", url), "--url"));
   CHECK(has(rysk.premium_quote_batch_args("f.json", url), "--url"));
+  CHECK(!has(rysk.premium_pools_args(), "--url"));
+  CHECK(has(rysk.premium_pools_args(url), "--url"));
+  CHECK(has(rysk.premium_request_args("f.json", 1, "1", url), "--url"));
+  CHECK(has(rysk.premium_taker_requests_args("0xpool", url), "--url"));
+  CHECK(has(rysk.premium_request_quotes_args("id", url), "--url"));
+  CHECK(has(rysk.premium_cancel_request_args("id", 1, "1", url), "--url"));
+  CHECK(has(rysk.premium_execute_args("7", "1", url), "--url"));
 }
 
 TEST(premium_rejects_unsignable_domains) {
@@ -294,6 +316,11 @@ TEST(no_arg_builder_carries_the_private_key) {
       rysk.premium_quote_args("rfq", signed_quote),
       rysk.premium_quote_batch_args("batch.json"),
       rysk.premium_cancel_args("id", 84532, "43"),
+      rysk.premium_request_args("requests.json", 84532, "44"),
+      rysk.premium_cancel_request_args("id", 84532, "45"),
+      rysk.premium_execute_args("7", "46"),
+      rysk.will_redeem_args(84532, MAKER, ASSET, true, "1"),
+      rysk.self_redeem_args(84532, "1"),
   };
 
   for (const auto& args : builders) {

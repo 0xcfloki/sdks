@@ -42,6 +42,7 @@ This CLI allows you to connect to a WebSocket server, send signed messages for a
 | --- | --- | --- |
 | `RYSK_PRIVATE_KEY` | every command that signs | Supplies `--private_key`, so the key stays out of `argv` where `ps` and shell history can see it. The flag still works and takes precedence. |
 | `RYSK_PREMIUM_URL` | `premium` | Supplies `--url`, so a staging or local api is pointed at once instead of on every call. |
+| `RYSK_URL` | `self-redeem` | Supplies `--url`, the v12 api (`https://v12.rysk.finance` by default). |
 
 ```sh
 export RYSK_PRIVATE_KEY=<hex private key>
@@ -95,7 +96,7 @@ Flags
 
 - `--url` (**required**): WebSocket URL to connect to.
 
-Commands for the connection - `balances`, `positions`, `quote` and `transfer` - are written to its
+Commands for the connection - `balances`, `positions`, `quote`, `transfer` and `will_redeem` - are written to its
 stdin, one json array of args per line, exactly as they would follow `./ryskV12` on the command line.
 They run in order inside the connect process, so nothing is spawned per message:
 
@@ -183,7 +184,7 @@ quote ... \
 
 ### `premium`
 
-Maker actions against the premium RFQ api (`https://premium.rysk.finance`, override with `--url`).
+Maker and taker actions against the premium RFQ api (`https://premium.rysk.finance`, override with `--url`).
 These are plain HTTP calls, so they need no `connect`: each subcommand does one
 request and prints the api's response on stdout as it came. Set `RYSK_PREMIUM_URL` instead of passing
 `--url` every time; a host that answers but has no RFQ routes is reported as such rather than as a
@@ -256,10 +257,45 @@ response either way and exits non zero when `failures` is not empty, so a reject
 mistaken for a stored one. An empty response body is treated as a failure too — the api recovers
 panics without writing a status.
 
+#### Taker
+
+A request's taker is always a pool, and the signing key has to be one of the pool's on chain RFQ
+signers.
+
+```bash
+./ryskV12 premium pools
+./ryskV12 premium request --batch <file|-> --chain_id <chain_id> --nonce <nonce> --private_key <pk>
+./ryskV12 premium taker-requests --taker <0xpool>
+./ryskV12 premium request-quotes --id <request_id>
+./ryskV12 premium cancel-request --id <request_id> --chain_id <chain_id> --nonce <nonce> --private_key <pk>
+./ryskV12 premium execute --quote_id <quote_id> --nonce <nonce> --private_key <pk>
+```
+
+| Subcommand | Route |
+| --- | --- |
+| `pools` | `GET /api/pools` — the pools requests can be opened on, with their option handler and assets |
+| `request` | `POST /api/requests` — open the requests in a json array, sent as written, authenticated with EIP712 headers |
+| `taker-requests` | `GET /api/requests/taker?address=` — a pool's live requests |
+| `request-quotes` | `GET /api/requests/{id}/quotes` — the live quotes on one request |
+| `cancel-request` | `DELETE /api/requests/{id}` — cancel a request and every quote on it, authenticated with EIP712 headers |
+| `execute` | `POST /api/execute` — take a quote: sign the confirmation and have the api settle it on chain |
+
+`request` answers `201` with no body; the ids are server assigned, so find a request through
+`taker-requests`. Each entry carries `asset` (the pool's underlying), `chainId`, `expiry` (unix
+seconds), `isPut`, `isTakerBuy`, `strike` (1e8), `quantity` (1e18), `taker` (the pool), `usd` (a
+registered strike asset), `collateralAsset` and `premiumAsset` (pool assets), `isPremium: true`,
+optionally `makers` to restrict who may quote, and `validUntil` in unix **milliseconds**.
+
+`execute` takes only the quote id: it reads the quote, its request and the pool's option handler from
+the api, signs the `Confirmation` under the handler's domain and prints the settling transaction's
+hash. The trade is final once that transaction is mined. When the taker sells (`isTakerBuy` false)
+the option handler pulls the premium from the maker, so the maker needs an allowance for it.
+
 #### Nonces
 
-`nonce` is a decimal uint64 and is spent once, whatever it was used for: quote nonces and the
-`cancel` auth nonce share one keyspace per address. Draw them from a single persisted counter per
+`nonce` is a decimal uint64 and is spent once per address, whatever it was used for: quote nonces and
+the auth nonces of `cancel`, `request` and `cancel-request` share one keyspace, and `execute`'s
+confirmation nonce is checked the same way. Draw them from a single persisted counter per
 signing key — the CLI holds no state between invocations.
 
 ### `transfer`
@@ -279,3 +315,43 @@ Flags
 - `--is_deposit`: present if deposit, not for withdrawal.
 - `--nonce` (**required**): A unique nonce for signing (stringified u64).
 - `--private_key` (**required**): The private key for signing.
+
+---
+
+### `will_redeem`
+
+Opts an otoken in or out of redemption at expiry. Written to a `connect`'s stdin on the maker endpoint, shown here as command line args.
+
+```bash
+will_redeem --chain_id <chain_id> --account <maker_address> --otoken <otoken_address> --nonce <nonce> --private_key <private_key> --will_redeem
+```
+
+Flags
+
+- `--chain_id` (**required**): The ID of the blockchain.
+- `--account` (**required**): The maker address; has to match the signing key.
+- `--otoken` (**required**): The otoken to opt in or out.
+- `--will_redeem`: present to have the otoken redeemed at expiry, left out to keep the balance.
+- `--nonce` (**required**): An unused nonce for this account (stringified u64).
+- `--private_key` (**required**): The private key for signing.
+
+---
+
+### `self-redeem`
+
+Redeems the signer's own expired otokens through the v12 api (`POST /api/redeem/self`). A plain HTTP
+call, so it needs no `connect`. The redeemer is whoever signs the auth headers, so it can only ever
+redeem for the caller. Prints the api's response.
+
+```bash
+./ryskV12 self-redeem --chain_id <chain_id> --nonce <nonce> [--expiry <unix_seconds>] [--exclude_assets <0xa,0xb>]
+```
+
+Flags
+
+- `--chain_id` (**required**): The chain to redeem on.
+- `--nonce` (**required**): An unused nonce for this account (decimal uint64), spent by the auth headers.
+- `--expiry`: Cutoff in unix seconds; otokens expiring at or before it are redeemed. Defaults to now.
+- `--exclude_assets`: Comma separated asset addresses to leave unredeemed.
+- `--url`: The v12 api, `https://v12.rysk.finance` by default (or `RYSK_URL`).
+- `--private_key` (**required**): The private key of the account redeeming.

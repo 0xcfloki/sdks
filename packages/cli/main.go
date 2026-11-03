@@ -18,8 +18,10 @@ var app = &Command{
 		positionsAction,
 		premiumAction,
 		quoteAction,
+		selfRedeemAction,
 		transferAction,
 		versionAction,
+		willRedeemAction,
 	},
 }
 

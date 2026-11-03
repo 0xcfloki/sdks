@@ -1,8 +1,6 @@
 module github.com/rysk-finance/ryskV12/packages/cli
 
-go 1.23.0
-
-toolchain go1.23.8
+go 1.27.3
 
 require (
 	github.com/ethereum/go-ethereum v1.15.7

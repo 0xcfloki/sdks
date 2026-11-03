@@ -94,6 +94,14 @@ def test_no_arg_builder_carries_the_private_key(sdk):
         sdk.premium_quote_args("rfq", premium_quote),
         sdk.premium_quote_batch_args("batch.json"),
         sdk.premium_cancel_args("id", 84532, "43"),
+        sdk.premium_pools_args(),
+        sdk.premium_request_args("requests.json", 84532, "43"),
+        sdk.premium_taker_requests_args(MAKER),
+        sdk.premium_request_quotes_args("id"),
+        sdk.premium_cancel_request_args("id", 84532, "43"),
+        sdk.premium_execute_args("id", "43"),
+        sdk.will_redeem_args(84532, MAKER, ASSET, True, "1"),
+        sdk.self_redeem_args(84532, "1"),
     ]
 
     for args in builders:
@@ -168,6 +176,22 @@ def test_premium_url_only_passed_when_given(sdk):
     assert "--url" not in sdk.premium_requests_args(MAKER)
     args = sdk.premium_requests_args(MAKER, "http://localhost:8080")
     assert flag_value(args, "--url") == "http://localhost:8080"
+
+
+def test_premium_taker_builders(sdk):
+    url = "http://localhost:8080"
+    assert sdk.premium_pools_args() == ["premium", "pools"]
+    assert sdk.premium_request_args("-", 84532, "43", url) == [
+        "premium", "request", "--batch", "-", "--chain_id", "84532", "--nonce", "43", "--url", url,
+    ]
+    assert sdk.premium_taker_requests_args(MAKER) == ["premium", "taker-requests", "--taker", MAKER]
+    assert sdk.premium_request_quotes_args("r1") == ["premium", "request-quotes", "--id", "r1"]
+    assert sdk.premium_cancel_request_args("r1", 84532, "43") == [
+        "premium", "cancel-request", "--id", "r1", "--chain_id", "84532", "--nonce", "43",
+    ]
+    assert sdk.premium_execute_args("q1", "43", url) == [
+        "premium", "execute", "--quote_id", "q1", "--nonce", "43", "--url", url,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -385,3 +409,16 @@ def test_a_successful_call_has_no_error():
     )
     assert res.error is None
     assert res.result == {"ok": True}
+
+
+def test_will_redeem_and_self_redeem(sdk):
+    assert sdk.will_redeem_args(84532, MAKER, ASSET, True, "7") == [
+        "will_redeem", "--chain_id", "84532", "--account", MAKER, "--otoken", ASSET, "--nonce", "7", "--will_redeem",
+    ]
+    assert "--will_redeem" not in sdk.will_redeem_args(84532, MAKER, ASSET, False, "7")
+    assert sdk.self_redeem_args(84532, "8") == [
+        "self-redeem", "--url", "https://rip-testnet.rysk.finance", "--chain_id", "84532", "--nonce", "8",
+    ]
+    assert sdk.self_redeem_args(84532, "8", 1767225600, [ASSET, MAKER], "http://x")[2:] == [
+        "http://x", "--chain_id", "84532", "--nonce", "8", "--expiry", "1767225600", "--exclude_assets", f"{ASSET},{MAKER}",
+    ]

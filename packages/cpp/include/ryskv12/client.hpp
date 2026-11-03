@@ -112,6 +112,21 @@ class Rysk {
   /// Throws Error when the quote's domain is one the cli could not sign.
   std::vector<std::string> quote_args(const std::string& rfq_id, const Quote& quote) const;
 
+  /// Opts an otoken in or out of redemption at expiry. Send it into a running
+  /// `connect` on the maker endpoint.
+  std::vector<std::string> will_redeem_args(std::int64_t chain_id, const std::string& account,
+                                            const std::string& otoken, bool will_redeem,
+                                            const std::string& nonce) const;
+
+  /// Redeems the signer's own otokens that expired at or before `expiry`
+  /// (default: now). A plain http call, so `run` it rather than `send` it.
+  /// `url` defaults to this env's api.
+  std::vector<std::string> self_redeem_args(
+      std::int64_t chain_id, const std::string& nonce,
+      std::optional<std::int64_t> expiry = std::nullopt,
+      const std::vector<std::string>& exclude_assets = {},
+      std::optional<std::string> url = std::nullopt) const;
+
   // ------------------------------------------------------------- premium rfq
 
   std::vector<std::string> premium_requests_args(
@@ -127,6 +142,29 @@ class Rysk {
       const std::string& source, std::optional<std::string> url = std::nullopt) const;
   std::vector<std::string> premium_cancel_args(
       const std::string& id, std::int64_t chain_id, const std::string& nonce,
+      std::optional<std::string> url = std::nullopt) const;
+
+  /// Taker: the pools requests can be opened on.
+  std::vector<std::string> premium_pools_args(std::optional<std::string> url = std::nullopt) const;
+  /// Taker: opens the requests in `source` (a json array, a file path or "-" for
+  /// stdin); this key has to be an rfq signer on each request's pool.
+  std::vector<std::string> premium_request_args(
+      const std::string& source, std::int64_t chain_id, const std::string& nonce,
+      std::optional<std::string> url = std::nullopt) const;
+  /// Taker: a pool's live requests.
+  std::vector<std::string> premium_taker_requests_args(
+      const std::string& taker, std::optional<std::string> url = std::nullopt) const;
+  /// Taker: the live quotes on one request.
+  std::vector<std::string> premium_request_quotes_args(
+      const std::string& id, std::optional<std::string> url = std::nullopt) const;
+  /// Taker: cancels a request and every quote on it.
+  std::vector<std::string> premium_cancel_request_args(
+      const std::string& id, std::int64_t chain_id, const std::string& nonce,
+      std::optional<std::string> url = std::nullopt) const;
+  /// Taker: takes a quote by id; the cli signs the confirmation and prints the
+  /// settlement's transaction hash.
+  std::vector<std::string> premium_execute_args(
+      const std::string& quote_id, const std::string& nonce,
       std::optional<std::string> url = std::nullopt) const;
 
   /// Serialises (request id, quote) pairs into the json array

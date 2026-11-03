@@ -25,7 +25,7 @@ const char* const kReleasesUrl = "https://github.com/rysk-finance/sdks/releases"
 namespace {
 
 /// Oldest cli this sdk will not warn about. Kept in step with the other sdks.
-constexpr std::array<int, 3> kMinCliVersion{5, 0, 0};
+constexpr std::array<int, 3> kMinCliVersion{5, 1, 0};
 
 void pair(std::vector<std::string>& args, const char* flag, std::string value) {
   args.emplace_back(flag);
@@ -235,6 +235,39 @@ std::vector<std::string> Rysk::domain_args(const Quote& quote) const {
   return args;
 }
 
+std::vector<std::string> Rysk::will_redeem_args(std::int64_t chain_id, const std::string& account,
+                                              const std::string& otoken, bool will_redeem,
+                                              const std::string& nonce) const {
+  std::vector<std::string> args{"will_redeem"};
+  pair(args, "--chain_id", std::to_string(chain_id));
+  pair(args, "--account", account);
+  pair(args, "--otoken", otoken);
+  pair(args, "--nonce", nonce);
+  if (will_redeem) args.emplace_back("--will_redeem");
+  return args;
+}
+
+std::vector<std::string> Rysk::self_redeem_args(std::int64_t chain_id, const std::string& nonce,
+                                              std::optional<std::int64_t> expiry,
+                                              const std::vector<std::string>& exclude_assets,
+                                              std::optional<std::string> url) const {
+  // ws://host/ -> http://host, wss://host/ -> https://host
+  std::string base = std::string("http") + (base_url(env_) + 2);
+  if (!base.empty() && base.back() == '/') base.pop_back();
+
+  std::vector<std::string> args{"self-redeem"};
+  pair(args, "--url", url ? *url : base);
+  pair(args, "--chain_id", std::to_string(chain_id));
+  pair(args, "--nonce", nonce);
+  if (expiry) pair(args, "--expiry", std::to_string(*expiry));
+  if (!exclude_assets.empty()) {
+    std::string joined;
+    for (const std::string& asset : exclude_assets) joined += (joined.empty() ? "" : ",") + asset;
+    pair(args, "--exclude_assets", joined);
+  }
+  return args;
+}
+
 // ----------------------------------------------------------------- premium rfq
 
 std::vector<std::string> Rysk::premium_url_args(const std::optional<std::string>& url) const {
@@ -333,6 +366,62 @@ std::vector<std::string> Rysk::premium_cancel_args(const std::string& id, std::i
   std::vector<std::string> args{"premium", "cancel"};
   pair(args, "--id", id);
   pair(args, "--chain_id", std::to_string(chain_id));
+  pair(args, "--nonce", nonce);
+  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
+  return args;
+}
+
+std::vector<std::string> Rysk::premium_pools_args(std::optional<std::string> url) const {
+  std::vector<std::string> args{"premium", "pools"};
+  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
+  return args;
+}
+
+std::vector<std::string> Rysk::premium_request_args(const std::string& source,
+                                                    std::int64_t chain_id,
+                                                    const std::string& nonce,
+                                                    std::optional<std::string> url) const {
+  std::vector<std::string> args{"premium", "request"};
+  pair(args, "--batch", source);
+  pair(args, "--chain_id", std::to_string(chain_id));
+  pair(args, "--nonce", nonce);
+  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
+  return args;
+}
+
+std::vector<std::string> Rysk::premium_taker_requests_args(const std::string& taker,
+                                                           std::optional<std::string> url) const {
+  std::vector<std::string> args{"premium", "taker-requests"};
+  pair(args, "--taker", taker);
+  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
+  return args;
+}
+
+std::vector<std::string> Rysk::premium_request_quotes_args(const std::string& id,
+                                                           std::optional<std::string> url) const {
+  std::vector<std::string> args{"premium", "request-quotes"};
+  pair(args, "--id", id);
+  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
+  return args;
+}
+
+std::vector<std::string> Rysk::premium_cancel_request_args(const std::string& id,
+                                                           std::int64_t chain_id,
+                                                           const std::string& nonce,
+                                                           std::optional<std::string> url) const {
+  std::vector<std::string> args{"premium", "cancel-request"};
+  pair(args, "--id", id);
+  pair(args, "--chain_id", std::to_string(chain_id));
+  pair(args, "--nonce", nonce);
+  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
+  return args;
+}
+
+std::vector<std::string> Rysk::premium_execute_args(const std::string& quote_id,
+                                                    const std::string& nonce,
+                                                    std::optional<std::string> url) const {
+  std::vector<std::string> args{"premium", "execute"};
+  pair(args, "--quote_id", quote_id);
   pair(args, "--nonce", nonce);
   for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
   return args;

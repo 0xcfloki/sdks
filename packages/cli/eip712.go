@@ -88,6 +88,13 @@ var EIP712_TYPES = &apitypes.Types{
 			Type: "address",
 		},
 	},
+	"WillRedeem": {
+		{Name: "account", Type: "address"},
+		{Name: "otoken", Type: "address"},
+		{Name: "chainId", Type: "uint256"},
+		{Name: "willRedeem", Type: "bool"},
+		{Name: "nonce", Type: "string"},
+	},
 	"Transfer": {
 		{
 			Name: "user",
@@ -253,4 +260,16 @@ func CreateTransferMessage(t Transfer) (messageHash []byte, typedData *apitypes.
 	}
 	messageHash = hash.Bytes()
 	return messageHash, typedData, nil
+}
+
+func CreateWillRedeemMessage(w WillRedeem) ([]byte, error) {
+	msg, _ := json.Marshal(w)
+	var imessage map[string]interface{}
+	json.Unmarshal(msg, &imessage)
+	delete(imessage, "signature")
+	hash, err := EncodeTypedData(createEIP712TypedData(createEIP712Domain(int64(w.ChainID)), "WillRedeem", imessage))
+	if err != nil {
+		return nil, err
+	}
+	return hash.Bytes(), nil
 }

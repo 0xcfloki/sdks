@@ -60,10 +60,27 @@ let status = sdk.execute_lines(&args, |line| println!("{line}"))?;
 Every `*_args` method is pure: it returns what the cli would be given without
 running anything, so you can assert on the whole surface without a binary.
 
+### Taking (premium rfq)
+
+A request's taker is a pool; the sdk's key has to be one of the pool's on chain
+rfq signers. A request's `validUntil` is in **milliseconds**; see the cli README
+for its fields.
+
+```rust
+sdk.premium_pools_args(None);
+// a json array of requests as the api takes them; answers with no body
+sdk.premium_request_args("requests.json", chain_id, &nonces.next()?, None);
+sdk.premium_taker_requests_args(&pool, None); // the pool's live requests
+sdk.premium_request_quotes_args(&request_id, None); // the quotes on one
+sdk.premium_cancel_request_args(&request_id, chain_id, &nonces.next()?, None);
+// take a quote: prints the settling transaction's hash
+sdk.premium_execute_args(&quote_id, &nonces.next()?, None);
+```
+
 ## The websocket flow
 
 Spawn `connect` once per endpoint and keep it. Websocket commands - quotes,
-transfers, balances, positions - are written to its stdin with `ryskv12::send`: the
+transfers, balances, positions, `will_redeem_args` - are written to its stdin with `ryskv12::send`: the
 running cli signs each one and sends it, no process per command.
 
 ```rust
@@ -78,6 +95,13 @@ ryskv12::send(&mut commands, &sdk.quote_args(&rfq_id, &quote)?)?;
 for line in replies.lines() {
     println!("{}", line?); // one json-rpc message per line
 }
+```
+
+Redeeming your own expired otokens is a plain http call to this env's api, run
+on its own rather than sent into a connection:
+
+```rust
+let out = sdk.execute(&sdk.self_redeem_args(84532, "45", None, &[], None))?.wait_with_output()?;
 
 maker.kill()?; // disconnect
 ```

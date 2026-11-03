@@ -38,13 +38,21 @@ const (
 
 var premiumAction = &Command{
 	Name:  "premium",
-	Usage: "maker actions against the premium rfq api",
+	Usage: "maker and taker actions against the premium rfq api",
 	Subcommands: []*Command{
+		// maker
 		premiumRequestsAction,
 		premiumQuoteAction,
 		premiumQuotesAction,
 		premiumQuoteStatusAction,
 		premiumCancelAction,
+		// taker
+		premiumPoolsAction,
+		premiumRequestAction,
+		premiumTakerRequestsAction,
+		premiumRequestQuotesAction,
+		premiumCancelRequestAction,
+		premiumExecuteAction,
 	},
 }
 
@@ -135,7 +143,7 @@ var premiumCancelAction = &Command{
 		},
 	},
 	Action: func(c *Context) error {
-		return premiumCancel(c)
+		return premiumAuthed(c, http.MethodDelete, "/api/quotes/"+url.PathEscape(c.String("id")), nil)
 	},
 }
 
@@ -337,33 +345,6 @@ func premiumStatusError(baseURL string, status int, body []byte) error {
 func premiumProxy(c *Context, method string, path string, query url.Values) error {
 	client := newPremiumClient(c.String("url"))
 	status, body, err := client.do(method, path, query, nil, nil)
-	if err != nil {
-		return err
-	}
-	if err := premiumStatusError(client.baseURL, status, body); err != nil {
-		return err
-	}
-
-	if trimmed := strings.TrimSpace(string(body)); trimmed != "" {
-		fmt.Println(trimmed)
-	}
-	return nil
-}
-
-func premiumCancel(c *Context) error {
-	nonce := c.String("nonce")
-	if _, err := strconv.ParseUint(nonce, 10, 64); err != nil {
-		return fmt.Errorf("invalid nonce %q: has to be a decimal uint64", nonce)
-	}
-
-	headers, err := premiumAuthHeaders(c.Int64("chain_id"), nonce, c.String("private_key"))
-	if err != nil {
-		return err
-	}
-
-	client := newPremiumClient(c.String("url"))
-	path := "/api/quotes/" + url.PathEscape(c.String("id"))
-	status, body, err := client.do(http.MethodDelete, path, nil, nil, headers)
 	if err != nil {
 		return err
 	}

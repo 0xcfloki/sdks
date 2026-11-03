@@ -127,6 +127,18 @@ account = "0xabc"
 rysk_sdk.send(maker, rysk_sdk.positions_args(account))
 ```
 
+### Redemption
+
+```python
+# opt an otoken in (True) or out (False) of redemption at expiry, over the maker connection
+rysk_sdk.send(maker, rysk_sdk.will_redeem_args(84532, account, "0xotoken", True, "44"))
+
+# redeem your own expired otokens now - a plain http call to this env's api
+rysk_sdk.execute(rysk_sdk.self_redeem_args(84532, "45"))
+# or up to an expiry, skipping some assets
+rysk_sdk.execute(rysk_sdk.self_redeem_args(84532, "46", expiry=1767225600, exclude_assets=["0xasset"]))
+```
+
 ### Send a Quote
 
 ```python
@@ -205,6 +217,28 @@ response and exits non zero when that array is not empty, so check the return co
 
 Nonces are spent once and share one keyspace per address across quotes and cancels — draw them from a
 single persisted counter.
+
+### Premium RFQ (taker)
+
+A request's taker is a pool; the SDK's key has to be one of the pool's on chain RFQ signers.
+
+```python
+rysk_sdk.execute(rysk_sdk.premium_pools_args())
+
+# a json array of requests as the api takes them; answers with no body
+with open("requests.json", "w") as f:
+    json.dump([request], f)
+rysk_sdk.execute(rysk_sdk.premium_request_args("requests.json", chain_id, "44"))
+
+rysk_sdk.execute(rysk_sdk.premium_taker_requests_args(pool))         # the pool's live requests
+rysk_sdk.execute(rysk_sdk.premium_request_quotes_args(request_id))   # the quotes on one
+rysk_sdk.execute(rysk_sdk.premium_cancel_request_args(request_id, chain_id, "45"))
+
+# take a quote: prints the settling transaction's hash
+rysk_sdk.execute(rysk_sdk.premium_execute_args(quote_id, "46"))
+```
+
+See the CLI README for the request fields; note a request's `validUntil` is in **milliseconds**.
 
 ## Examples
 

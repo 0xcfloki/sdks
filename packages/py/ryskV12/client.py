@@ -46,7 +46,7 @@ class Rysk:
     _env: Env
     _cli_path: str
     _private_key: str
-    _min_sdk_version: str = "5.0.0"
+    _min_sdk_version: str = "5.1.0"
 
     def __init__(
         self,
@@ -233,6 +233,46 @@ class Rysk:
     def positions_args(self, account: str):
         return ["positions", "--account", account]
 
+    def will_redeem_args(
+        self, chain_id: int, account: str, otoken: str, will_redeem: bool, nonce: str
+    ):
+        """Opts an otoken in or out of redemption at expiry. Send it into a
+        running connect on the maker endpoint."""
+        args = [
+            "will_redeem",
+            "--chain_id",
+            str(chain_id),
+            "--account",
+            account,
+            "--otoken",
+            otoken,
+            "--nonce",
+            nonce,
+        ]
+        if will_redeem:
+            args.append("--will_redeem")
+        return args
+
+    def self_redeem_args(
+        self,
+        chain_id: int,
+        nonce: str,
+        expiry: Optional[int] = None,
+        exclude_assets: Optional[List[str]] = None,
+        url: Optional[str] = None,
+    ):
+        """Redeems the signer's own otokens that expired at or before expiry
+        (default: now). A plain http call, so run it with execute, not send.
+        url defaults to this env's api."""
+        if url is None:
+            url = "http" + ENV_CONFIGS.get(self._env).base_url[2:].rstrip("/")
+        args = ["self-redeem", "--url", url, "--chain_id", str(chain_id), "--nonce", nonce]
+        if expiry is not None:
+            args += ["--expiry", str(expiry)]
+        if exclude_assets:
+            args += ["--exclude_assets", ",".join(exclude_assets)]
+        return args
+
     def _premium_url_args(self, url: Optional[str]) -> List[str]:
         """Base url of the premium rfq api. Left out of the args when not given,
         so the CLI's own default (production) applies; pass it for a local or
@@ -351,6 +391,64 @@ class Rysk:
             id,
             "--chain_id",
             str(chain_id),
+            "--nonce",
+            nonce,
+            *self._premium_url_args(url),
+        ]
+
+    def premium_pools_args(self, url: Optional[str] = None):
+        """Taker: the pools requests can be opened on."""
+        return ["premium", "pools", *self._premium_url_args(url)]
+
+    def premium_request_args(
+        self, source: str, chain_id: int, nonce: str, url: Optional[str] = None
+    ):
+        """Taker: opens the requests in source - a json array file path, or "-" for
+        stdin. This key has to be an rfq signer on each request's pool."""
+        return [
+            "premium",
+            "request",
+            "--batch",
+            source,
+            "--chain_id",
+            str(chain_id),
+            "--nonce",
+            nonce,
+            *self._premium_url_args(url),
+        ]
+
+    def premium_taker_requests_args(self, taker: str, url: Optional[str] = None):
+        """Taker: a pool's live requests."""
+        return ["premium", "taker-requests", "--taker", taker, *self._premium_url_args(url)]
+
+    def premium_request_quotes_args(self, id: str, url: Optional[str] = None):
+        """Taker: the live quotes on one request."""
+        return ["premium", "request-quotes", "--id", id, *self._premium_url_args(url)]
+
+    def premium_cancel_request_args(
+        self, id: str, chain_id: int, nonce: str, url: Optional[str] = None
+    ):
+        """Taker: cancels a request and every quote on it."""
+        return [
+            "premium",
+            "cancel-request",
+            "--id",
+            id,
+            "--chain_id",
+            str(chain_id),
+            "--nonce",
+            nonce,
+            *self._premium_url_args(url),
+        ]
+
+    def premium_execute_args(self, quote_id: str, nonce: str, url: Optional[str] = None):
+        """Taker: takes a quote by id. The CLI signs the confirmation, the api
+        settles it on chain, and the transaction hash is printed."""
+        return [
+            "premium",
+            "execute",
+            "--quote_id",
+            quote_id,
             "--nonce",
             nonce,
             *self._premium_url_args(url),

@@ -155,7 +155,7 @@ class Rysk {
   private _env: Env;
   private _cli_path: string;
   private _private_key: string;
-  private _minSdkVersion: string = "5.0.0";
+  private _minSdkVersion: string = "5.1.0";
   private _strictVersion: boolean;
 
   /**
@@ -284,6 +284,56 @@ class Rysk {
 
   public positionsArgs(account: string) {
     return ["positions", "--account", account];
+  }
+
+  /**
+   * Opts an otoken in or out of redemption at expiry. Send it into a running
+   * `connect` on the maker endpoint.
+   */
+  public willRedeemArgs(
+    chainId: number,
+    account: string,
+    otoken: HexString,
+    willRedeem: boolean,
+    nonce: string,
+  ) {
+    return [
+      "will_redeem",
+      "--chain_id",
+      chainId.toString(),
+      "--account",
+      account,
+      "--otoken",
+      otoken,
+      "--nonce",
+      nonce,
+      ...(willRedeem ? ["--will_redeem"] : []),
+    ];
+  }
+
+  /**
+   * Redeems the signer's own otokens that expired at or before `expiry`
+   * (default: now). A plain http call, so run it with `execute`, not `send`.
+   * `url` defaults to this env's api.
+   */
+  public selfRedeemArgs(
+    chainId: number,
+    nonce: string,
+    expiry?: number,
+    excludeAssets: Array<HexString> = [],
+    url?: string,
+  ) {
+    return [
+      "self-redeem",
+      "--url",
+      url ?? ENV_CONFIGS[this._env].base_url.replace(/^ws/, "http").replace(/\/$/, ""),
+      "--chain_id",
+      chainId.toString(),
+      "--nonce",
+      nonce,
+      ...(expiry !== undefined ? ["--expiry", expiry.toString()] : []),
+      ...(excludeAssets.length ? ["--exclude_assets", excludeAssets.join(",")] : []),
+    ];
   }
 
   /**
@@ -484,6 +534,93 @@ class Rysk {
       id,
       "--chain_id",
       chainId.toString(),
+      "--nonce",
+      nonce,
+      ...this._premiumURLArgs(url),
+    ];
+  }
+
+  /** Taker: the pools requests can be opened on. */
+  public premiumPoolsArgs(url?: string) {
+    return ["premium", "pools", ...this._premiumURLArgs(url)];
+  }
+
+  /**
+   * Taker: opens the requests in `source` - a json array as the api takes them,
+   * as a file path or "-" for stdin. This key has to be an rfq signer on each
+   * request's pool (its `taker`); the nonce authenticates the post.
+   */
+  public premiumRequestArgs(
+    source: string,
+    chainId: number,
+    nonce: string,
+    url?: string,
+  ) {
+    return [
+      "premium",
+      "request",
+      "--batch",
+      source,
+      "--chain_id",
+      chainId.toString(),
+      "--nonce",
+      nonce,
+      ...this._premiumURLArgs(url),
+    ];
+  }
+
+  /** Taker: a pool's live requests. */
+  public premiumTakerRequestsArgs(taker: string, url?: string) {
+    return [
+      "premium",
+      "taker-requests",
+      "--taker",
+      taker,
+      ...this._premiumURLArgs(url),
+    ];
+  }
+
+  /** Taker: the live quotes on one request. */
+  public premiumRequestQuotesArgs(id: string, url?: string) {
+    return [
+      "premium",
+      "request-quotes",
+      "--id",
+      id,
+      ...this._premiumURLArgs(url),
+    ];
+  }
+
+  /** Taker: cancels a request and every quote on it. */
+  public premiumCancelRequestArgs(
+    id: string,
+    chainId: number,
+    nonce: string,
+    url?: string,
+  ) {
+    return [
+      "premium",
+      "cancel-request",
+      "--id",
+      id,
+      "--chain_id",
+      chainId.toString(),
+      "--nonce",
+      nonce,
+      ...this._premiumURLArgs(url),
+    ];
+  }
+
+  /**
+   * Taker: takes a quote by id. The CLI signs the confirmation and the api
+   * settles it on chain; it prints the transaction hash.
+   */
+  public premiumExecuteArgs(quoteId: string, nonce: string, url?: string) {
+    return [
+      "premium",
+      "execute",
+      "--quote_id",
+      quoteId,
       "--nonce",
       nonce,
       ...this._premiumURLArgs(url),

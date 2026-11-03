@@ -69,6 +69,23 @@ Every `*_args` method is pure: it returns what the cli would be given without
 running anything, so the whole surface is testable without a binary. A domain
 the cli could not sign throws `ryskv12::Error` before anything is spawned.
 
+### Taking (premium rfq)
+
+A request's taker is a pool; the sdk's key has to be one of the pool's on chain
+rfq signers. A request's `validUntil` is in **milliseconds**; see the cli README
+for its fields.
+
+```cpp
+sdk.run(sdk.premium_pools_args());
+// a json array of requests as the api takes them; answers with no body
+sdk.run(sdk.premium_request_args("requests.json", chain_id, nonce_a));
+sdk.run(sdk.premium_taker_requests_args(pool));        // the pool's live requests
+sdk.run(sdk.premium_request_quotes_args(request_id));  // the quotes on one
+sdk.run(sdk.premium_cancel_request_args(request_id, chain_id, nonce_b));
+// take a quote: prints the settling transaction's hash
+Output taken = sdk.run(sdk.premium_execute_args(quote_id, nonce_c));
+```
+
 ## Approving and depositing
 
 Leave the asset out and the cli falls back to the chain's strike asset:
@@ -86,9 +103,13 @@ sdk.run(sdk.approve_args(84532, "1000000", rpc_url, asset));
 ## Connections
 
 `connect` holds a websocket open. `spawn` it, and `send` it the signed commands
-(`quote_args`, `transfer_args`, `balances_args`, `positions_args`): each one
+(`quote_args`, `transfer_args`, `balances_args`, `positions_args`,
+`will_redeem_args`): each one
 goes in on the cli's stdin and is signed and sent by that same process, so
 nothing new is started per quote. `kill()` disconnects.
+
+`self_redeem_args(chain_id, nonce)` redeems your own expired otokens. It is a
+plain http call to this env's api, so `run` it rather than `send` it.
 
 The cli writes one json-rpc message per line. A failed call carries `error`
 instead of `result`, so read that first:

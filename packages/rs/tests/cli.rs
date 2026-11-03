@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ryskv12::{Env, Quote, Rysk, TypedDataDomain};
+use ryskv12::{Env, Quote, Request, Rysk, TypedDataDomain};
 
 /// well known test key; its address is the maker below
 const PK: &str = "4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318";
@@ -351,4 +351,182 @@ fn send_writes_one_json_line_of_args() {
     child.kill().ok();
     child.wait().ok();
     assert_eq!(serde_json::from_str::<Vec<String>>(&line).unwrap(), args);
+}
+
+/// Opt in against the real testnet api (`make e2e` reads the keys from the
+/// repo's .env): a taker opens an rfq only the maker may quote, the maker polls
+/// for it, quotes, cancels and quotes again, and the taker takes the trade on
+/// chain. The trade is real but costs the maker 1 wei; it relies on the maker's
+/// premium allowance for the pool's option handler, which the go e2e sets up.
+#[test]
+fn testnet_open_an_rfq_quote_cancel_requote_and_take_the_trade() {
+    let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    let (Some(key), Some(maker), Some(taker_key), Some(pool_addr)) = (
+        env("RYSK_E2E_PRIVATE_KEY"),
+        env("RYSK_E2E_MAKER"),
+        env("RYSK_E2E_TAKER_PRIVATE_KEY"),
+        env("RYSK_E2E_POOL"),
+    ) else {
+        eprintln!(
+            "set RYSK_E2E_PRIVATE_KEY, RYSK_E2E_MAKER, RYSK_E2E_TAKER_PRIVATE_KEY and \
+             RYSK_E2E_POOL to run against testnet"
+        );
+        return;
+    };
+    if sdk().is_none() {
+        return;
+    }
+    let (maker, pool_addr) = (maker.to_lowercase(), pool_addr.to_lowercase());
+    let url = env("RYSK_E2E_PREMIUM_URL").unwrap_or("https://insti-testnet.rysk.finance".into());
+    let url = Some(url.as_str());
+    // base sepolia's strike asset, which a request's usd has to be
+    const USD: &str = "0x98d56648c9b7f3cb49531f4135115b5000ab1733";
+    let client = |key: String| {
+        Rysk::builder(Env::Testnet, key)
+            .cli_path(cli_path())
+            .build()
+            .expect("building a client must not fail")
+    };
+    let (mk, tk) = (client(key), client(taker_key));
+    let ok = |sdk: &Rysk, args: Vec<String>| {
+        let (code, stdout, stderr) = run(sdk, &args);
+        assert_eq!(code, 0, "{}: {stderr}\n{stdout}", args[1]);
+        stdout
+    };
+    let list = |sdk: &Rysk, args: Vec<String>| -> Vec<serde_json::Value> {
+        let out = ok(sdk, args);
+        serde_json::from_str(if out.is_empty() { "[]" } else { &out }).expect("a json array")
+    };
+    let as_text = |v: &serde_json::Value| v.as_str().map(String::from).unwrap_or(v.to_string());
+    // unix nanoseconds: spent once per address, fresh across runs
+    let last = std::cell::Cell::new(0u128);
+    let nonce = || {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        last.set(now.max(last.get() + 1));
+        last.get().to_string()
+    };
+
+    // 1. the taker opens a request on the pool, only this maker may quote
+    let pool = list(&tk, tk.premium_pools_args(url))
+        .into_iter()
+        .find(|p| p["address"].as_str().map(str::to_lowercase) == Some(pool_addr.clone()))
+        .unwrap_or_else(|| panic!("pool {pool_addr} is not listed"));
+    let chain_id = pool["chainId"].as_i64().expect("pool chainId");
+    // next friday 08:00 utc at least a week out; 1970-01-01 was a thursday
+    let mut day = (millis() / 1000 / 86400) as i64 + 7;
+    while (day + 4) % 7 != 5 {
+        day += 1;
+    }
+    let dir = std::env::temp_dir().join(format!("rysk-rs-e2e-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("requests.json");
+    let requests = serde_json::json!([{
+        "asset": pool["underlying"],
+        "chainId": chain_id,
+        "expiry": day * 86400 + 8 * 3600,
+        "isPut": pool["type"] == "Put",
+        "isTakerBuy": false,
+        "quantity": "1000000000000000000",
+        "strike": "100000000000000",
+        "taker": pool["address"],
+        "usd": USD,
+        "collateralAsset": pool["asset"],
+        "premiumAsset": pool["asset"],
+        "isPremium": true,
+        "makers": [maker],
+        "validUntil": millis() as u64 + 5 * 60_000,
+    }]);
+    std::fs::write(&file, requests.to_string()).unwrap();
+    ok(
+        &tk,
+        tk.premium_request_args(file.to_str().unwrap(), chain_id, &nonce(), url),
+    );
+    std::fs::remove_dir_all(&dir).ok();
+
+    // 2. the maker polls its requests until that one shows up
+    let mut request = None;
+    for _ in 0..30 {
+        request = list(&mk, mk.premium_requests_args(&maker, url))
+            .into_iter()
+            .filter_map(|r| serde_json::from_value::<Request>(r).ok())
+            .filter(|r| r.taker.to_lowercase() == pool_addr)
+            .last();
+        if request.is_some() {
+            break;
+        }
+        thread::sleep(std::time::Duration::from_secs(1));
+    }
+    let request =
+        request.unwrap_or_else(|| panic!("no request from {pool_addr} listed for {maker}"));
+    let request_id = request.id.clone().expect("a listed request has an id");
+
+    let quote = || {
+        let n = nonce();
+        let quote = Quote {
+            asset_address: request.asset.clone(),
+            chain_id: request.chain_id,
+            expiry: request.expiry,
+            is_put: request.is_put,
+            is_taker_buy: request.is_taker_buy.unwrap_or(false),
+            maker: maker.clone(),
+            nonce: n.clone(),
+            price: "1".into(),
+            quantity: request.quantity.clone(),
+            strike: request.strike.clone(),
+            valid_until: (millis() / 1000) as i64 + 300,
+            usd: request.usd.clone(),
+            collateral_asset: request.collateral_asset.clone(),
+            premium_asset: None,
+            domain: request.type_data_domain.clone(),
+        };
+        ok(
+            &mk,
+            mk.premium_quote_args(&request_id, &quote, url)
+                .expect("the request's domain is signable"),
+        );
+        n
+    };
+    let on_book = |n: &str| {
+        list(&mk, mk.premium_quotes_args(&maker, url))
+            .iter()
+            .find(|q| as_text(&q["nonce"]) == n)
+            .map(|q| as_text(&q["id"]))
+    };
+
+    // 3-4. quote, then cancel it off the book
+    let first = quote();
+    let id = on_book(&first)
+        .unwrap_or_else(|| panic!("quote with nonce {first} is not in the maker's live quotes"));
+    ok(
+        &mk,
+        mk.premium_cancel_args(&id, request.chain_id, &nonce(), url),
+    );
+    assert_eq!(
+        on_book(&first),
+        None,
+        "quote {id} is still live after cancel"
+    );
+
+    // 5-6. quote again, and the taker takes it from the request's book
+    let second = quote();
+    let picked = list(&tk, tk.premium_request_quotes_args(&request_id, url))
+        .into_iter()
+        .find(|q| as_text(&q["nonce"]) == second)
+        .map(|q| as_text(&q["id"]))
+        .unwrap_or_else(|| {
+            panic!("quote with nonce {second} is not on request {request_id}'s book")
+        });
+    let tx = ok(&tk, tk.premium_execute_args(&picked, &nonce(), url));
+    assert!(
+        tx.len() == 66 && tx.starts_with("0x") && tx[2..].chars().all(|c| c.is_ascii_hexdigit()),
+        "not a transaction hash: {tx}"
+    );
+    assert_eq!(
+        on_book(&second),
+        None,
+        "quote {picked} is still live after the trade"
+    );
 }

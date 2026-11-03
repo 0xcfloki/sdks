@@ -45,7 +45,7 @@ var send = func(payload any) error {
 // write to the websocket.
 var channelApp = &Command{
 	Name:        "ryskV12",
-	Subcommands: []*Command{balancesAction, positionsAction, quoteAction, transferAction},
+	Subcommands: []*Command{balancesAction, positionsAction, quoteAction, transferAction, willRedeemAction},
 }
 
 func connect(c *Context) error {

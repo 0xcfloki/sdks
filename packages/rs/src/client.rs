@@ -8,7 +8,7 @@ pub const RELEASES_URL: &str = "https://github.com/rysk-finance/sdks/releases";
 
 /// Oldest cli this sdk will not warn about. Kept in step with the other sdks'
 /// `_minSdkVersion` / `_min_sdk_version`.
-const MIN_CLI_VERSION: (u64, u64, u64) = (5, 0, 0);
+const MIN_CLI_VERSION: (u64, u64, u64) = (5, 1, 0);
 
 const DEFAULT_CLI_PATH: &str = "./ryskV12";
 
@@ -392,6 +392,52 @@ impl Rysk {
 
     // ------------------------------------------------------------ premium rfq
 
+    /// Opts an otoken in or out of redemption at expiry. Send it into a running
+    /// `connect` on the maker endpoint.
+    pub fn will_redeem_args(
+        &self,
+        chain_id: i64,
+        account: &str,
+        otoken: &str,
+        will_redeem: bool,
+        nonce: &str,
+    ) -> Vec<String> {
+        let mut args = vec!["will_redeem".to_string()];
+        pair(&mut args, "--chain_id", chain_id.to_string());
+        pair(&mut args, "--account", account);
+        pair(&mut args, "--otoken", otoken);
+        pair(&mut args, "--nonce", nonce);
+        if will_redeem {
+            args.push("--will_redeem".into());
+        }
+        args
+    }
+
+    /// Redeems the signer's own otokens that expired at or before `expiry`
+    /// (default: now). A plain http call, so run it with `execute`, not `send`.
+    /// `url` defaults to this env's api.
+    pub fn self_redeem_args(
+        &self,
+        chain_id: i64,
+        nonce: &str,
+        expiry: Option<i64>,
+        exclude_assets: &[&str],
+        url: Option<&str>,
+    ) -> Vec<String> {
+        let default_url = format!("http{}", self.env.base_url()[2..].trim_end_matches('/'));
+        let mut args = vec!["self-redeem".to_string()];
+        pair(&mut args, "--url", url.unwrap_or(&default_url));
+        pair(&mut args, "--chain_id", chain_id.to_string());
+        pair(&mut args, "--nonce", nonce);
+        if let Some(expiry) = expiry {
+            pair(&mut args, "--expiry", expiry.to_string());
+        }
+        if !exclude_assets.is_empty() {
+            pair(&mut args, "--exclude_assets", exclude_assets.join(","));
+        }
+        args
+    }
+
     /// Base url of the premium rfq api. Left out of the args when not given, so
     /// the cli's own default (production) applies; pass it for a local or
     /// staging api.
@@ -538,6 +584,77 @@ impl Rysk {
         args.extend(self.premium_url_args(url));
         args
     }
+
+    /// Taker: the pools requests can be opened on.
+    pub fn premium_pools_args(&self, url: Option<&str>) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "pools".to_string()];
+        args.extend(self.premium_url_args(url));
+        args
+    }
+
+    /// Taker: opens the requests in `source` (a json array, file path or `-` for
+    /// stdin). This key has to be an rfq signer on each request's pool.
+    pub fn premium_request_args(
+        &self,
+        source: &str,
+        chain_id: i64,
+        nonce: &str,
+        url: Option<&str>,
+    ) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "request".to_string()];
+        pair(&mut args, "--batch", source);
+        pair(&mut args, "--chain_id", chain_id.to_string());
+        pair(&mut args, "--nonce", nonce);
+        args.extend(self.premium_url_args(url));
+        args
+    }
+
+    /// Taker: a pool's live requests.
+    pub fn premium_taker_requests_args(&self, taker: &str, url: Option<&str>) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "taker-requests".to_string()];
+        pair(&mut args, "--taker", taker);
+        args.extend(self.premium_url_args(url));
+        args
+    }
+
+    /// Taker: the live quotes on one request.
+    pub fn premium_request_quotes_args(&self, id: &str, url: Option<&str>) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "request-quotes".to_string()];
+        pair(&mut args, "--id", id);
+        args.extend(self.premium_url_args(url));
+        args
+    }
+
+    /// Taker: cancels a request and every quote on it.
+    pub fn premium_cancel_request_args(
+        &self,
+        id: &str,
+        chain_id: i64,
+        nonce: &str,
+        url: Option<&str>,
+    ) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "cancel-request".to_string()];
+        pair(&mut args, "--id", id);
+        pair(&mut args, "--chain_id", chain_id.to_string());
+        pair(&mut args, "--nonce", nonce);
+        args.extend(self.premium_url_args(url));
+        args
+    }
+
+    /// Taker: takes a quote by id; the cli signs the confirmation and prints
+    /// the settlement's transaction hash.
+    pub fn premium_execute_args(
+        &self,
+        quote_id: &str,
+        nonce: &str,
+        url: Option<&str>,
+    ) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "execute".to_string()];
+        pair(&mut args, "--quote_id", quote_id);
+        pair(&mut args, "--nonce", nonce);
+        args.extend(self.premium_url_args(url));
+        args
+    }
 }
 
 /// The two rejections both domains share: a salt cannot be signed, and a chain
@@ -585,6 +702,6 @@ mod tests {
     fn version_ordering_is_numeric_not_lexical() {
         assert!(parse_version("4.10.0") > parse_version("4.9.0"));
         assert!(parse_version("4.9.9") < Some(MIN_CLI_VERSION));
-        assert!(parse_version("5.0.0") >= Some(MIN_CLI_VERSION));
+        assert!(parse_version("5.1.0") >= Some(MIN_CLI_VERSION));
     }
 }

@@ -125,6 +125,18 @@ makerProc.send(ryskSDK.transferArgs(transferDetails));
 makerProc.send(ryskSDK.positionsArgs("0xabc"));
 ```
 
+### Redemption
+
+```ts
+// opt an otoken in (true) or out (false) of redemption at expiry, over the maker connection
+makerProc.send(ryskSDK.willRedeemArgs(84532, "0xabc", "0xotoken", true, "44"));
+
+// redeem your own expired otokens now - a plain http call to this env's api
+ryskSDK.execute(ryskSDK.selfRedeemArgs(84532, "45"));
+// or up to an expiry, skipping some assets
+ryskSDK.execute(ryskSDK.selfRedeemArgs(84532, "46", 1767225600, ["0xasset"]));
+```
+
 ### Send a Quote
 
 ```ts
@@ -201,6 +213,27 @@ response and exits non zero when that array is not empty, so check the exit code
 
 Nonces are spent once and share one keyspace per address across quotes and cancels — draw them from a
 single persisted counter.
+
+### Premium RFQ (taker)
+
+A request's taker is a pool; the SDK's key has to be one of the pool's on chain RFQ signers.
+
+```ts
+ryskSDK.execute(ryskSDK.premiumPoolsArgs());
+
+// a json array of requests as the api takes them; answers with no body
+writeFileSync("requests.json", JSON.stringify([request]));
+ryskSDK.execute(ryskSDK.premiumRequestArgs("requests.json", chainId, "44"));
+
+ryskSDK.execute(ryskSDK.premiumTakerRequestsArgs(pool));       // the pool's live requests
+ryskSDK.execute(ryskSDK.premiumRequestQuotesArgs(requestId));  // the quotes on one
+ryskSDK.execute(ryskSDK.premiumCancelRequestArgs(requestId, chainId, "45"));
+
+// take a quote: prints the settling transaction's hash
+ryskSDK.execute(ryskSDK.premiumExecuteArgs(quoteId, "46"));
+```
+
+See the CLI README for the request fields; note a request's `validUntil` is in **milliseconds**.
 
 ## Examples
 
