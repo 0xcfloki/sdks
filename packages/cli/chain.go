@@ -105,7 +105,7 @@ func (a *Account) newTransactionOpts(ctx context.Context, chainID int, c ethclie
 func (a *Account) approve(ctx context.Context, chainID int, client ethclient.Client, amount *big.Int, asset common.Address) (txHash string, err error) {
 	opts, err := a.newTransactionOpts(ctx, chainID, client)
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 
 	erc20, err := NewIERC20(asset, &client)

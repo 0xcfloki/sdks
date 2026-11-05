@@ -53,6 +53,9 @@ func approve(c *cli.Context) error {
 
 	asset := ADDRESSES[chain_id].StrikeAsset
 	if assetArg := c.String("asset"); assetArg != "" {
+		if !common.IsHexAddress(assetArg) {
+			return fmt.Errorf("invalid asset %q", assetArg)
+		}
 		asset = common.HexToAddress(assetArg)
 	}
 
