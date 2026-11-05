@@ -60,9 +60,10 @@ var quoteAction = &cli.Command{
 			Name:     "strike",
 			Required: true,
 		},
-		&cli.StringFlag{
+		&cli.Int64Flag{
 			Name:     "valid_until",
 			Required: true,
+			Usage:    "quote expiry in unix seconds",
 		},
 		&cli.StringFlag{
 			Name:     "usd",
